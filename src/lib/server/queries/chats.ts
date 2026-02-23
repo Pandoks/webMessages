@@ -1,0 +1,194 @@
+import { getDb } from '../db.js';
+import { appleToUnixMs } from '../date-utils.js';
+import { getMessageText } from '../attributed-body.js';
+import type { Chat, Participant } from '$lib/types/index.js';
+
+interface ChatRow {
+	rowid: number;
+	guid: string;
+	chat_identifier: string;
+	display_name: string | null;
+	service_name: string;
+	style: number;
+	is_archived: number;
+	last_message_rowid: number | null;
+	last_message_guid: string | null;
+	last_message_text: string | null;
+	last_message_attributed_body: Buffer | null;
+	last_message_date: number;
+	last_message_is_from_me: number;
+	last_message_service: string | null;
+	last_message_associated_message_type: number;
+}
+
+interface HandleRow {
+	handle_id: number;
+	handle_identifier: string;
+	service: string;
+}
+
+// Cache prepared statements (created once, reused)
+let _chatListStmt: ReturnType<ReturnType<typeof getDb>['prepare']> | null = null;
+let _chatParticipantsStmt: ReturnType<ReturnType<typeof getDb>['prepare']> | null = null;
+let _chatByIdStmt: ReturnType<ReturnType<typeof getDb>['prepare']> | null = null;
+
+function chatListStmt() {
+	if (!_chatListStmt) {
+		_chatListStmt = getDb().prepare<[], ChatRow>(`
+			SELECT
+				c.ROWID as rowid,
+				c.guid,
+				c.chat_identifier,
+				c.display_name,
+				c.service_name,
+				c.style,
+				c.is_archived,
+				m.ROWID as last_message_rowid,
+				m.guid as last_message_guid,
+				m.text as last_message_text,
+				m.attributedBody as last_message_attributed_body,
+				m.date as last_message_date,
+				m.is_from_me as last_message_is_from_me,
+				m.service as last_message_service,
+				m.associated_message_type as last_message_associated_message_type
+			FROM chat c
+			INNER JOIN chat_message_join cmj ON cmj.chat_id = c.ROWID
+			INNER JOIN message m ON m.ROWID = cmj.message_id
+			WHERE m.ROWID = (
+				SELECT cmj3.message_id
+				FROM chat_message_join cmj3
+				INNER JOIN message m3 ON m3.ROWID = cmj3.message_id
+				WHERE cmj3.chat_id = c.ROWID
+					AND m3.associated_message_type = 0
+					AND m3.item_type = 0
+				ORDER BY m3.date DESC
+				LIMIT 1
+			)
+			ORDER BY m.date DESC
+		`);
+	}
+	return _chatListStmt;
+}
+
+function chatParticipantsStmt() {
+	if (!_chatParticipantsStmt) {
+		_chatParticipantsStmt = getDb().prepare<[number], HandleRow>(`
+			SELECT
+				h.ROWID as handle_id,
+				h.id as handle_identifier,
+				h.service
+			FROM handle h
+			JOIN chat_handle_join chj ON h.ROWID = chj.handle_id
+			WHERE chj.chat_id = ?
+		`);
+	}
+	return _chatParticipantsStmt;
+}
+
+function chatByIdStmt() {
+	if (!_chatByIdStmt) {
+		_chatByIdStmt = getDb().prepare<[number], ChatRow>(`
+			SELECT
+				c.ROWID as rowid,
+				c.guid,
+				c.chat_identifier,
+				c.display_name,
+				c.service_name,
+				c.style,
+				c.is_archived,
+				m.ROWID as last_message_rowid,
+				m.guid as last_message_guid,
+				m.text as last_message_text,
+				m.attributedBody as last_message_attributed_body,
+				m.date as last_message_date,
+				m.is_from_me as last_message_is_from_me,
+				m.service as last_message_service,
+				m.associated_message_type as last_message_associated_message_type
+			FROM chat c
+			LEFT JOIN chat_message_join cmj ON cmj.chat_id = c.ROWID
+			LEFT JOIN message m ON m.ROWID = cmj.message_id
+			WHERE c.ROWID = ?
+				AND m.ROWID = (
+					SELECT cmj3.message_id
+					FROM chat_message_join cmj3
+					JOIN message m3 ON m3.ROWID = cmj3.message_id
+					WHERE cmj3.chat_id = c.ROWID
+						AND m3.associated_message_type = 0
+						AND m3.item_type = 0
+					ORDER BY m3.date DESC
+					LIMIT 1
+				)
+		`);
+	}
+	return _chatByIdStmt;
+}
+
+export function getChatList(): Chat[] {
+	const rows = (chatListStmt() as ReturnType<ReturnType<typeof getDb>['prepare']>).all() as ChatRow[];
+	return rows.map(rowToChat);
+}
+
+export function getChatParticipants(chatId: number): Participant[] {
+	const rows = (chatParticipantsStmt() as ReturnType<ReturnType<typeof getDb>['prepare']>).all(chatId) as HandleRow[];
+	return rows.map((r) => ({
+		handle_id: r.handle_id,
+		handle_identifier: r.handle_identifier,
+		display_name: r.handle_identifier,
+		service: r.service
+	}));
+}
+
+export function getChatById(chatId: number): Chat | null {
+	const row = (chatByIdStmt() as ReturnType<ReturnType<typeof getDb>['prepare']>).get(chatId) as ChatRow | undefined;
+	if (!row) return null;
+	return rowToChat(row);
+}
+
+function rowToChat(row: ChatRow): Chat {
+	const lastMessageText =
+		row.last_message_rowid !== null
+			? getMessageText(row.last_message_text, row.last_message_attributed_body)
+			: undefined;
+
+	return {
+		rowid: row.rowid,
+		guid: row.guid,
+		chat_identifier: row.chat_identifier,
+		display_name: row.display_name || null,
+		service_name: row.service_name,
+		style: row.style,
+		is_archived: row.is_archived === 1,
+		unread_count: 0,
+		last_message:
+			row.last_message_rowid !== null
+				? {
+						rowid: row.last_message_rowid,
+						guid: row.last_message_guid!,
+						text: row.last_message_text,
+						handle_id: 0,
+						service: row.last_message_service ?? '',
+						is_from_me: row.last_message_is_from_me === 1,
+						date: appleToUnixMs(row.last_message_date),
+						date_read: null,
+						date_delivered: null,
+						date_retracted: null,
+						date_edited: null,
+						is_delivered: false,
+						is_sent: false,
+						is_read: false,
+						cache_has_attachments: false,
+						associated_message_type: row.last_message_associated_message_type,
+						associated_message_guid: null,
+						associated_message_emoji: null,
+						thread_originator_guid: null,
+						thread_originator_part: null,
+						group_title: null,
+						group_action_type: 0,
+						item_type: 0,
+						other_handle: 0,
+						chat_id: row.rowid,
+						body: lastMessageText
+					}
+				: undefined
+	};
+}
