@@ -7,11 +7,12 @@
 
 	let { chat, navigatingToChatId }: { chat: Chat; navigatingToChatId?: string } = $props();
 
-	const isActive = $derived(
-		page.params.chatId === String(chat.rowid) ||
-		navigatingToChatId === String(chat.rowid) ||
-		(page.state as any).chatId === chat.rowid
-	);
+	const isActive = $derived.by(() => {
+		const shallowId = (page.state as any)?.chatId;
+		if (shallowId != null) return shallowId === chat.rowid;
+		if (navigatingToChatId) return navigatingToChatId === String(chat.rowid);
+		return page.params.chatId === String(chat.rowid);
+	});
 
 	const preview = $derived.by(() => {
 		if (!chat.last_message) return '';

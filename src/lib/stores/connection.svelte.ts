@@ -12,10 +12,16 @@ let offlineTimer: ReturnType<typeof setTimeout> | null = null;
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 
 const messageListeners = new Set<(events: NewMessageEvent[]) => void>();
+const contactsReadyListeners = new Set<() => void>();
 
 export function onNewMessages(callback: (events: NewMessageEvent[]) => void) {
 	messageListeners.add(callback);
 	return () => messageListeners.delete(callback);
+}
+
+export function onContactsReady(callback: () => void) {
+	contactsReadyListeners.add(callback);
+	return () => contactsReadyListeners.delete(callback);
 }
 
 export function getConnectionState() {
@@ -48,6 +54,12 @@ export function connect() {
 		const data: NewMessageEvent[] = JSON.parse(event.data);
 		for (const listener of messageListeners) {
 			listener(data);
+		}
+	});
+
+	eventSource.addEventListener('contacts_ready', () => {
+		for (const listener of contactsReadyListeners) {
+			listener();
 		}
 	});
 

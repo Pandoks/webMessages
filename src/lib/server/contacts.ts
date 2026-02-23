@@ -110,8 +110,12 @@ export async function loadContacts(): Promise<boolean> {
 /** Kick off contact + photo loading in the background. Safe to call multiple times. */
 export function ensureContactsLoading(): void {
 	loadContacts()
-		.then((success) => {
+		.then(async (success) => {
 			if (success) {
+				// Notify clients that contacts are ready so they can refresh names
+				const { broadcast } = await import('./watcher.js');
+				broadcast({ type: 'contacts_ready', data: {} });
+
 				exportContactPhotos().catch((err) =>
 					console.error('Photo export error:', err)
 				);

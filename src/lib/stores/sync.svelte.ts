@@ -14,6 +14,7 @@ import {
 	connect,
 	disconnect,
 	onNewMessages,
+	onContactsReady,
 	getConnectionState
 } from './connection.svelte.js';
 import {
@@ -28,6 +29,7 @@ import type { Message } from '$lib/types/index.js';
 
 let activeChatId: number | null = null;
 let unsubscribeMessages: (() => void) | null = null;
+let unsubscribeContacts: (() => void) | null = null;
 
 /** Initialize the sync engine. Call once from layout onMount. */
 export function initSync() {
@@ -40,13 +42,23 @@ export function initSync() {
 	// 3. Connect SSE
 	connect();
 
-	// 4. Register SSE handler
+	// 4. Register SSE handlers
 	unsubscribeMessages = onNewMessages(handleNewMessages);
+	unsubscribeContacts = onContactsReady(() => {
+		refreshChatList();
+		if (activeChatId !== null) {
+			loadChat(activeChatId);
+		}
+	});
 
 	return () => {
 		if (unsubscribeMessages) {
 			unsubscribeMessages();
 			unsubscribeMessages = null;
+		}
+		if (unsubscribeContacts) {
+			unsubscribeContacts();
+			unsubscribeContacts = null;
 		}
 		disconnect();
 	};

@@ -33,9 +33,32 @@ export async function loadCachedChats() {
 }
 
 export function setServerChats(serverChats: Chat[]) {
+	// Preserve cached display names when server returns unresolved names
+	if (chats.length > 0) {
+		const cachedNames = new Map<number, string>();
+		for (const c of chats) {
+			if (c.display_name) cachedNames.set(c.rowid, c.display_name);
+		}
+		for (const sc of serverChats) {
+			const cached = cachedNames.get(sc.rowid);
+			if (cached && (!sc.display_name || looksUnresolved(sc.display_name))) {
+				sc.display_name = cached;
+			}
+		}
+	}
+
 	chats = serverChats;
 	source = 'server';
 	cacheChats(serverChats);
+}
+
+/** Check if a display name looks like a raw phone number or email (not a real contact name) */
+function looksUnresolved(name: string): boolean {
+	// Phone-like: starts with + or digit, mostly digits/spaces/dashes/parens
+	if (/^[+\d][\d\s()\-+.]+$/.test(name)) return true;
+	// Email
+	if (name.includes('@') && name.includes('.')) return true;
+	return false;
 }
 
 export function updateChatLastMessage(chatId: number, message: Message) {

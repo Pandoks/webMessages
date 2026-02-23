@@ -76,7 +76,7 @@ export function removeClient(client: SSEClient): void {
 }
 
 /** Broadcast an event to all connected SSE clients */
-function broadcast(event: { type: string; data: unknown }): void {
+export function broadcast(event: { type: string; data: unknown }): void {
 	const payload = `event: ${event.type}\ndata: ${JSON.stringify(event.data)}\n\n`;
 
 	for (const client of clients) {
