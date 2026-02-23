@@ -3,13 +3,14 @@
 	import ContactAvatar from './ContactAvatar.svelte';
 	import { formatChatListDate } from '$lib/utils/date.js';
 	import { page } from '$app/state';
+	import { pushState } from '$app/navigation';
 
 	let { chat, navigatingToChatId }: { chat: Chat; navigatingToChatId?: string } = $props();
 
-	// Highlight immediately when navigating to this chat (before data loads)
 	const isActive = $derived(
 		page.params.chatId === String(chat.rowid) ||
-		navigatingToChatId === String(chat.rowid)
+		navigatingToChatId === String(chat.rowid) ||
+		(page.state as any).chatId === chat.rowid
 	);
 
 	const preview = $derived.by(() => {
@@ -23,13 +24,18 @@
 	const dateStr = $derived(
 		chat.last_message ? formatChatListDate(chat.last_message.date) : ''
 	);
+
+	function handleClick(e: MouseEvent) {
+		e.preventDefault();
+		pushState(`/chat/${chat.rowid}`, { chatId: chat.rowid });
+	}
 </script>
 
 <a
 	href="/chat/{chat.rowid}"
+	onclick={handleClick}
 	class="flex items-center gap-3 px-4 py-3 transition-colors hover:bg-gray-100
 		{isActive ? 'bg-blue-50' : ''}"
-	data-sveltekit-preload-data="tap"
 >
 	<ContactAvatar
 		name={chat.display_name ?? '?'}

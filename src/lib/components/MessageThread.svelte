@@ -66,7 +66,7 @@
 <div
 	bind:this={scrollContainer}
 	onscroll={handleScroll}
-	class="flex flex-1 flex-col gap-0.5 overflow-y-auto overscroll-contain px-4 py-3"
+	class="flex min-w-0 flex-1 flex-col gap-0.5 overflow-y-auto overflow-x-hidden overscroll-contain px-4 py-3"
 >
 	{#if loading}
 		<div class="py-2 text-center text-xs text-gray-400">Loading older messages...</div>

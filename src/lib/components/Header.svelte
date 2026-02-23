@@ -21,11 +21,11 @@
 
 <div class="flex items-center gap-3 border-b border-gray-200 bg-white px-4 py-3">
 	<!-- Back button for mobile -->
-	<a href="/" class="mr-1 text-blue-500 md:hidden" aria-label="Back to conversations">
+	<button onclick={() => history.back()} class="mr-1 text-blue-500 md:hidden" aria-label="Back to conversations">
 		<svg class="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 			<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7" />
 		</svg>
-	</a>
+	</button>
 
 	<ContactAvatar
 		name={chat.display_name ?? '?'}

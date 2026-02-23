@@ -7,6 +7,8 @@ type NewMessageEvent = {
 
 let eventSource: EventSource | null = $state(null);
 let connected = $state(false);
+let isOffline = $state(false);
+let offlineTimer: ReturnType<typeof setTimeout> | null = null;
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 
 const messageListeners = new Set<(events: NewMessageEvent[]) => void>();
@@ -20,6 +22,9 @@ export function getConnectionState() {
 	return {
 		get connected() {
 			return connected;
+		},
+		get isOffline() {
+			return isOffline;
 		}
 	};
 }
@@ -31,6 +36,11 @@ export function connect() {
 
 	eventSource.addEventListener('connected', () => {
 		connected = true;
+		isOffline = false;
+		if (offlineTimer) {
+			clearTimeout(offlineTimer);
+			offlineTimer = null;
+		}
 		console.log('SSE connected');
 	});
 
@@ -43,6 +53,12 @@ export function connect() {
 
 	eventSource.onerror = () => {
 		connected = false;
+		if (!offlineTimer && !isOffline) {
+			offlineTimer = setTimeout(() => {
+				isOffline = true;
+				offlineTimer = null;
+			}, 10_000);
+		}
 		eventSource?.close();
 		eventSource = null;
 		// Reconnect after 3 seconds
@@ -54,6 +70,10 @@ export function disconnect() {
 	if (reconnectTimer) {
 		clearTimeout(reconnectTimer);
 		reconnectTimer = null;
+	}
+	if (offlineTimer) {
+		clearTimeout(offlineTimer);
+		offlineTimer = null;
 	}
 	if (eventSource) {
 		eventSource.close();

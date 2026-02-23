@@ -1,0 +1,146 @@
+<script lang="ts">
+	import Header from '$lib/components/Header.svelte';
+	import MessageThread from '$lib/components/MessageThread.svelte';
+	import MessageInput from '$lib/components/MessageInput.svelte';
+	import { getConnectionState } from '$lib/stores/connection.svelte.js';
+	import { getChatStore } from '$lib/stores/chats.svelte.js';
+	import {
+		loadChat,
+		loadOlderMessages,
+		addOptimisticMessage,
+		removeOptimisticMessage
+	} from '$lib/stores/sync.svelte.js';
+	import type { Message } from '$lib/types/index.js';
+
+	let { chatId }: { chatId: number } = $props();
+
+	const connection = getConnectionState();
+	const chatStore = getChatStore();
+
+	let sending = $state(false);
+	let loadingOlder = $state(false);
+	let hasMore = $state(true);
+
+	const chat = $derived(chatStore.chats.find((c) => c.rowid === chatId) ?? null);
+	const allMessages = $derived(chatStore.getMessages(chatId));
+	const participants = $derived(chatStore.getParticipants(chatId));
+
+	// Load chat data when chatId changes
+	$effect(() => {
+		const id = chatId;
+		hasMore = true;
+		loadingOlder = false;
+		loadChat(id);
+	});
+
+	async function loadMore() {
+		if (loadingOlder || !hasMore) return;
+		loadingOlder = true;
+
+		try {
+			const oldestDate = allMessages[0]?.date ?? Infinity;
+			const result = await loadOlderMessages(chatId, oldestDate, allMessages.length);
+			hasMore = result.hasMore;
+		} catch (err) {
+			console.error('Failed to load older messages:', err);
+		} finally {
+			loadingOlder = false;
+		}
+	}
+
+	async function handleSendFile(file: File) {
+		if (!chat) return;
+		sending = true;
+		try {
+			const formData = new FormData();
+			formData.append('file', file);
+			formData.append('chatGuid', chat.guid);
+
+			const res = await fetch('/api/attachments/upload', {
+				method: 'POST',
+				body: formData
+			});
+			if (!res.ok) {
+				console.error('Failed to send attachment');
+			}
+		} catch (err) {
+			console.error('Upload error:', err);
+		} finally {
+			sending = false;
+		}
+	}
+
+	async function handleSend(text: string) {
+		if (!chat) return;
+		sending = true;
+		const optimistic: Message = {
+			rowid: -Date.now(),
+			guid: `temp-${Date.now()}`,
+			text,
+			handle_id: 0,
+			service: chat.service_name,
+			is_from_me: true,
+			date: Date.now(),
+			date_read: null,
+			date_delivered: null,
+			date_retracted: null,
+			date_edited: null,
+			is_delivered: false,
+			is_sent: false,
+			is_read: false,
+			cache_has_attachments: false,
+			associated_message_type: 0,
+			associated_message_guid: null,
+			associated_message_emoji: null,
+			thread_originator_guid: null,
+			thread_originator_part: null,
+			group_title: null,
+			group_action_type: 0,
+			item_type: 0,
+			other_handle: 0,
+			chat_id: chatId,
+			sender: 'Me',
+			body: text
+		};
+		addOptimisticMessage(chatId, optimistic);
+
+		try {
+			const res = await fetch('/api/messages', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({
+					chatGuid: chat.guid,
+					text
+				})
+			});
+			if (!res.ok) {
+				console.error('Failed to send message');
+				removeOptimisticMessage(chatId, optimistic.guid);
+			}
+		} catch (err) {
+			console.error('Send error:', err);
+			removeOptimisticMessage(chatId, optimistic.guid);
+		} finally {
+			sending = false;
+		}
+	}
+</script>
+
+{#if chat}
+	<div class="flex h-full flex-col">
+		<Header {chat} {participants} />
+		<MessageThread
+			messages={allMessages}
+			isGroup={chat.style === 43}
+			onLoadMore={loadMore}
+			{hasMore}
+			loading={loadingOlder}
+		/>
+		<MessageInput
+			onSend={handleSend}
+			onSendFile={handleSendFile}
+			disabled={sending}
+			offline={!connection.connected}
+		/>
+	</div>
+{/if}

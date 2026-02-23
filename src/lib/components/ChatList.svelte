@@ -62,9 +62,19 @@
 		{#each filteredChats as chat (chat.rowid)}
 			<ChatListItem {chat} {navigatingToChatId} />
 		{/each}
-		{#if filteredChats.length === 0}
+		{#if filteredChats.length === 0 && !searchQuery}
+			{#each Array(8) as _}
+				<div class="flex items-center gap-3 px-4 py-3">
+					<div class="h-12 w-12 shrink-0 animate-pulse rounded-full bg-gray-200"></div>
+					<div class="flex-1">
+						<div class="h-4 w-28 animate-pulse rounded bg-gray-200"></div>
+						<div class="mt-2 h-3 w-44 animate-pulse rounded bg-gray-100"></div>
+					</div>
+				</div>
+			{/each}
+		{:else if filteredChats.length === 0}
 			<div class="p-4 text-center text-sm text-gray-400">
-				{searchQuery ? 'No conversations found' : 'No conversations'}
+				No conversations found
 			</div>
 		{/if}
 	</div>

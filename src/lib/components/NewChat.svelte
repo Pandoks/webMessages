@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { goto } from '$app/navigation';
+	import { refreshChatList } from '$lib/stores/sync.svelte.js';
 
 	let { open = $bindable(false) }: { open: boolean } = $props();
 
@@ -31,8 +31,7 @@
 			open = false;
 			recipient = '';
 			message = '';
-			// Refresh to show the new chat
-			goto('/', { invalidateAll: true });
+			refreshChatList();
 		} catch {
 			error = 'Failed to send message';
 		} finally {

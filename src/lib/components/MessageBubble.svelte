@@ -39,7 +39,7 @@
 	</div>
 {:else}
 	<div class="flex {isSent ? 'justify-end' : 'justify-start'} group">
-		<div class="max-w-[75%]">
+		<div class="min-w-0 max-w-[75%]">
 			{#if showSender && !isSent && isGroup}
 				<p class="mb-0.5 px-3 text-xs font-medium text-gray-500">
 					{message.sender ?? 'Unknown'}
@@ -69,7 +69,7 @@
 					{/if}
 
 					{#if displayText}
-						<span class="whitespace-pre-wrap">{displayText}</span>
+						<span class="whitespace-pre-wrap [overflow-wrap:anywhere]">{displayText}</span>
 					{/if}
 
 					{#if isEdited}

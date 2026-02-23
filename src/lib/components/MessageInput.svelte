@@ -2,12 +2,16 @@
 	let {
 		onSend,
 		onSendFile,
-		disabled = false
+		disabled = false,
+		offline = false
 	}: {
 		onSend: (text: string) => void;
 		onSendFile?: (file: File) => void;
 		disabled?: boolean;
+		offline?: boolean;
 	} = $props();
+
+	const isDisabled = $derived(disabled || offline);
 
 	let text = $state('');
 	let textarea: HTMLTextAreaElement | undefined = $state();
@@ -23,7 +27,7 @@
 		}
 
 		const trimmed = text.trim();
-		if (!trimmed || disabled) return;
+		if (!trimmed || isDisabled) return;
 		onSend(trimmed);
 		text = '';
 		if (textarea) {
@@ -108,7 +112,7 @@
 		/>
 		<button
 			onclick={() => fileInput?.click()}
-			{disabled}
+			disabled={isDisabled}
 			aria-label="Attach file"
 			class="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-gray-400 hover:bg-gray-100 hover:text-gray-600 disabled:opacity-50"
 		>
@@ -123,14 +127,14 @@
 			onkeydown={handleKeydown}
 			oninput={handleInput}
 			onpaste={handlePaste}
-			placeholder="iMessage"
+			placeholder={offline ? "You're offline" : 'iMessage'}
 			rows="1"
-			{disabled}
+			disabled={isDisabled}
 			class="flex-1 resize-none rounded-2xl bg-gray-100 px-4 py-2 text-sm outline-none placeholder:text-gray-400 focus:ring-2 focus:ring-blue-300 disabled:opacity-50"
 		></textarea>
 		<button
 			onclick={handleSubmit}
-			disabled={disabled || (!text.trim() && !pendingFile)}
+			disabled={isDisabled || (!text.trim() && !pendingFile)}
 			aria-label="Send message"
 			class="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-blue-500 text-white transition-colors hover:bg-blue-600 disabled:bg-gray-300"
 		>
