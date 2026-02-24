@@ -2,6 +2,7 @@
 	import type { Attachment } from '$lib/types/index.js';
 
 	let { attachment }: { attachment: Attachment } = $props();
+	const filename = $derived((attachment.transfer_name ?? attachment.filename ?? '').toLowerCase());
 
 	const isImage = $derived(
 		attachment.mime_type?.startsWith('image/') ||
@@ -11,37 +12,68 @@
 	);
 
 	const isVideo = $derived(
-		attachment.mime_type?.startsWith('video/') || attachment.uti === 'com.apple.quicktime-movie'
+		attachment.mime_type?.startsWith('video/') ||
+			attachment.uti === 'com.apple.quicktime-movie' ||
+			filename.endsWith('.mov') ||
+			filename.endsWith('.mp4') ||
+			filename.endsWith('.m4v') ||
+			filename.endsWith('.webm')
 	);
 
 	const thumbnailUrl = $derived(`/api/attachments/${attachment.rowid}/thumbnail`);
-	const fullUrl = $derived(`/api/attachments/${attachment.rowid}`);
+	const fullUrl = $derived(`/api/attachments/${attachment.rowid}?v=2`);
+	const downloadUrl = $derived(`/api/attachments/${attachment.rowid}?download=1&v=2`);
 	const displayName = $derived(attachment.transfer_name ?? 'Attachment');
 </script>
 
 {#if isImage}
-	<a href={fullUrl} target="_blank" rel="noopener" class="block">
-		<img
-			src={thumbnailUrl}
-			alt={displayName}
-			class="max-h-64 max-w-xs rounded-lg object-cover"
-			loading="lazy"
-		/>
-	</a>
+	<div class="inline-flex flex-col gap-1">
+		<a href={fullUrl} target="_blank" rel="noopener" class="block">
+			<img
+				src={thumbnailUrl}
+				alt={displayName}
+				class="max-h-64 max-w-xs rounded-lg object-cover"
+				loading="lazy"
+			/>
+		</a>
+		<a
+			href={downloadUrl}
+			download={displayName}
+			class="text-xs text-blue-600 hover:underline"
+		>
+			Download image
+		</a>
+	</div>
 {:else if isVideo}
-	<video
-		controls
-		preload="metadata"
-		class="max-h-64 max-w-xs rounded-lg"
-	>
-		<source src={fullUrl} type={attachment.mime_type ?? 'video/mp4'} />
-		<track kind="captions" />
-	</video>
+	<div class="inline-flex flex-col gap-1">
+		<video
+			controls
+			preload="metadata"
+			class="max-h-64 max-w-xs rounded-lg"
+		>
+			<source src={fullUrl} />
+			<track kind="captions" />
+		</video>
+		<a
+			href={fullUrl}
+			target="_blank"
+			rel="noopener"
+			class="text-xs text-blue-600 hover:underline"
+		>
+			Open video in new tab
+		</a>
+		<a
+			href={downloadUrl}
+			download={displayName}
+			class="text-xs text-blue-600 hover:underline"
+		>
+			Download video
+		</a>
+	</div>
 {:else if !attachment.hide_attachment}
 	<a
-		href={fullUrl}
-		target="_blank"
-		rel="noopener"
+		href={downloadUrl}
+		download={displayName}
 		class="flex items-center gap-2 rounded-lg bg-gray-100 p-2 text-sm text-blue-600 hover:bg-gray-200"
 	>
 		<svg class="h-5 w-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">

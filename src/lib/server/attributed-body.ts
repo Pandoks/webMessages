@@ -11,6 +11,15 @@ function isLikelyTextByte(b: number): boolean {
 	return (b >= 0x20 && b <= 0x7e) || (b >= 0xc2 && b <= 0xf4);
 }
 
+/** Decode a UTF-8 buffer safely. Returns null if decoding fails. */
+function decodeUtf8(bytes: Buffer): string | null {
+	try {
+		return new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+	} catch {
+		return null;
+	}
+}
+
 /** Check if a byte is a typedstream terminator (0x84-0x91) */
 function isAttributedTerminator(b: number): boolean {
 	return b >= 0x84 && b <= 0x91;
@@ -148,6 +157,20 @@ function cleanupTypedstreamText(raw: string, fromAttributed: boolean): string {
 /** Extract a text segment from the bytes following an NSString marker */
 function extractNSStringSegment(segment: Buffer): string {
 	if (segment.length === 0) return '';
+
+	// Newer typedstream payloads encode as: "+" <len-byte> <utf8-bytes>.
+	// Example bytes: 2b 03 36 30 36 86 ...  => "606"
+	for (let i = 0; i + 2 < segment.length; i++) {
+		if (segment[i] !== 0x2b) continue; // '+'
+		const byteLen = segment[i + 1];
+		if (byteLen <= 0 || byteLen > 0x7f) continue;
+		const end = i + 2 + byteLen;
+		if (end > segment.length) continue;
+		const decoded = decodeUtf8(segment.subarray(i + 2, end));
+		if (!decoded) continue;
+		const cleaned = sanitizeText(decoded);
+		if (cleaned) return cleaned;
+	}
 
 	// Find the first byte that looks like text
 	let start = -1;

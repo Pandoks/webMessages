@@ -26,15 +26,20 @@
 	const isEdited = $derived(message.date_edited && message.date_edited > 0);
 	const isGroupAction = $derived(message.group_title !== null && message.group_action_type > 0);
 
-	const timeStr = $derived(formatMessageTime(message.date));
+const timeStr = $derived(formatMessageTime(message.date));
 
-	const displayText = $derived.by(() => {
-		if (isRetracted) return 'This message was unsent';
-		if (isGroupAction) {
-			return `${message.sender ?? 'Someone'} named the conversation "${message.group_title}"`;
-		}
-		return message.body ?? '';
-	});
+function cleanAttachmentPlaceholder(text: string): string {
+	// iMessage often prefixes attachment messages with U+FFFC object replacement chars.
+	return text.replace(/\uFFFC/g, '').trimStart();
+}
+
+const displayText = $derived.by(() => {
+	if (isRetracted) return 'This message was unsent';
+	if (isGroupAction) {
+		return `${message.sender ?? 'Someone'} named the conversation "${message.group_title}"`;
+	}
+	return cleanAttachmentPlaceholder(message.body ?? '');
+});
 </script>
 
 {#if isGroupAction}
