@@ -10,8 +10,8 @@
 		focusToken = 0,
 		onCancelReply
 	}: {
-		onSend: (text: string) => void;
-		onSendFile?: (file: File) => void;
+		onSend: (text: string) => void | Promise<void>;
+		onSendFile?: (file: File) => void | Promise<void>;
 		disabled?: boolean;
 		offline?: boolean;
 		replyTo?: Message;
@@ -37,17 +37,31 @@
 		});
 	});
 
-	function handleSubmit() {
+	async function handleSubmit() {
+		if (isDisabled) return;
+
+		const trimmed = text.trim();
 		if (pendingFile && onSendFile) {
-			onSendFile(pendingFile);
+			const file = pendingFile;
 			pendingFile = null;
+			if (fileInput) fileInput.value = '';
+
+			// Keep behavior intuitive: if user typed text + attached file,
+			// send both instead of dropping the text.
+			if (trimmed) {
+				await Promise.resolve(onSend(trimmed));
+			}
+			await Promise.resolve(onSendFile(file));
+
 			text = '';
+			if (textarea) {
+				textarea.style.height = 'auto';
+			}
 			return;
 		}
 
-		const trimmed = text.trim();
-		if (!trimmed || isDisabled) return;
-		onSend(trimmed);
+		if (!trimmed) return;
+		await Promise.resolve(onSend(trimmed));
 		text = '';
 		if (textarea) {
 			textarea.style.height = 'auto';
