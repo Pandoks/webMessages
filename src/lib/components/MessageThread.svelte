@@ -15,7 +15,7 @@
 	}: {
 		messages: Message[];
 		isGroup?: boolean;
-		onLoadMore?: () => void;
+		onLoadMore?: () => void | Promise<void>;
 		hasMore?: boolean;
 		loading?: boolean;
 		onReact?: (message: Message, reactionType: number) => void;
@@ -24,6 +24,7 @@
 
 	let scrollContainer: HTMLDivElement | undefined = $state();
 	let wasAtBottom = true;
+	let loadInFlight = false;
 
 	// Build a map of guid → message for reply lookups
 	const messageMap = $derived.by(() => {
@@ -41,7 +42,7 @@
 		}
 	});
 
-	function handleScroll() {
+	async function handleScroll() {
 		if (!scrollContainer) return;
 
 		// Track if user is at the bottom
@@ -49,13 +50,22 @@
 		wasAtBottom = scrollHeight - scrollTop - clientHeight < 50;
 
 		// Load more when scrolled to top
-		if (scrollTop < 100 && hasMore && !loading && onLoadMore) {
+		if (scrollTop < 100 && messages.length > 0 && hasMore && !loading && !loadInFlight && onLoadMore) {
 			const prevHeight = scrollHeight;
-			onLoadMore();
-			// Preserve scroll position after older messages load
+			const prevTop = scrollTop;
+			loadInFlight = true;
+			try {
+				await onLoadMore();
+			} catch (err) {
+				console.error('Failed to load older messages:', err);
+			} finally {
+				loadInFlight = false;
+			}
+			// Preserve scroll position after older messages load.
 			requestAnimationFrame(() => {
 				if (scrollContainer) {
-					scrollContainer.scrollTop = scrollContainer.scrollHeight - prevHeight;
+					const delta = scrollContainer.scrollHeight - prevHeight;
+					scrollContainer.scrollTop = Math.max(0, prevTop + delta);
 				}
 			});
 		}

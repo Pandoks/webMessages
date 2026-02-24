@@ -5,7 +5,7 @@ import { getAttachmentsByMessage } from '$lib/server/queries/attachments.js';
 import { getReactionsByChat } from '$lib/server/queries/reactions.js';
 import { getChatById, getChatParticipants } from '$lib/server/queries/chats.js';
 import { resolveContact } from '$lib/server/contacts.js';
-import { isReactionType, aggregateReactions } from '$lib/utils/reactions.js';
+import { aggregateReactions } from '$lib/utils/reactions.js';
 import type { Message } from '$lib/types/index.js';
 
 export const GET: RequestHandler = ({ params, url }) => {
@@ -31,13 +31,9 @@ export const GET: RequestHandler = ({ params, url }) => {
 	const rawReactions = getReactionsByChat(chatId);
 	const reactionMap = aggregateReactions(rawReactions);
 
-	// Filter to display messages, attach reactions
-	const displayMessages: Message[] = [];
+	// Attach reactions to already-displayable messages (query-side filtering)
 	for (const msg of messages) {
-		if (isReactionType(msg.associated_message_type)) continue;
-		if (msg.item_type !== 0 && msg.group_action_type === 0 && !msg.group_title) continue;
 		msg.reactions = reactionMap.get(msg.guid) ?? [];
-		displayMessages.push(msg);
 	}
 
 	// Resolve sender names
@@ -49,7 +45,7 @@ export const GET: RequestHandler = ({ params, url }) => {
 		p.display_name = name;
 	}
 
-	for (const msg of displayMessages) {
+	for (const msg of messages) {
 		if (msg.is_from_me) {
 			msg.sender = 'Me';
 		} else if (msg.sender) {
@@ -70,5 +66,5 @@ export const GET: RequestHandler = ({ params, url }) => {
 		}
 	}
 
-	return json({ chat, messages: displayMessages, participants });
+	return json({ chat, messages, participants });
 };

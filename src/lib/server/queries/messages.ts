@@ -75,6 +75,8 @@ function messagesByChatStmt() {
 			JOIN chat_message_join cmj ON m.ROWID = cmj.message_id
 			LEFT JOIN handle h ON m.handle_id = h.ROWID
 			WHERE cmj.chat_id = ?
+				AND m.associated_message_type = 0
+				AND NOT (m.item_type != 0 AND m.group_action_type = 0 AND m.group_title IS NULL)
 			ORDER BY m.date DESC
 			LIMIT ? OFFSET ?
 		`);
