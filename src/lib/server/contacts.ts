@@ -15,6 +15,7 @@ let photoMap: Map<string, { path: string; mime: string }> = new Map();
 let loaded = false;
 let loading: Promise<boolean> | null = null;
 let photosLoaded = false;
+let contactsReadyBroadcasted = false;
 
 const PHOTO_CACHE_DIR = join(process.env.HOME ?? '', '.cache/webMessages/contact-photos');
 const NICKNAME_CACHE_DIR = join(
@@ -112,9 +113,13 @@ export function ensureContactsLoading(): void {
 	loadContacts()
 		.then(async (success) => {
 			if (success) {
-				// Notify clients that contacts are ready so they can refresh names
-				const { broadcast } = await import('./watcher.js');
-				broadcast({ type: 'contacts_ready', data: {} });
+				// Notify clients once per process startup that contacts are ready.
+				// Without this guard, every request would rebroadcast contacts_ready.
+				if (!contactsReadyBroadcasted) {
+					const { broadcast } = await import('./watcher.js');
+					broadcast({ type: 'contacts_ready', data: {} });
+					contactsReadyBroadcasted = true;
+				}
 
 				exportContactPhotos().catch((err) =>
 					console.error('Photo export error:', err)
