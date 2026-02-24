@@ -373,3 +373,50 @@ export function getAllContacts(): Contact[] {
 
 	return Array.from(byName.values());
 }
+
+export interface ContactMatch {
+	name: string;
+	identifier: string;
+}
+
+/** Find contact identifiers by display name query (exact > prefix > contains). */
+export function findContactMatches(query: string, limit = 5): ContactMatch[] {
+	const q = query.trim().toLowerCase();
+	if (!q) return [];
+
+	const candidates: Array<{ score: number; name: string; identifier: string }> = [];
+	const contacts = getAllContacts();
+	for (const contact of contacts) {
+		const name = contact.name.trim();
+		if (!name) continue;
+		const lower = name.toLowerCase();
+
+		let score = 0;
+		if (lower === q) score = 3;
+		else if (lower.startsWith(q)) score = 2;
+		else if (lower.includes(q)) score = 1;
+		if (score === 0) continue;
+
+		for (const phone of contact.phones) {
+			if (!phone) continue;
+			candidates.push({ score, name: contact.name, identifier: phone });
+		}
+		for (const email of contact.emails) {
+			if (!email) continue;
+			candidates.push({ score, name: contact.name, identifier: email });
+		}
+	}
+
+	candidates.sort((a, b) => b.score - a.score || a.name.localeCompare(b.name));
+	const unique: ContactMatch[] = [];
+	const seen = new Set<string>();
+	for (const item of candidates) {
+		const key = item.identifier.toLowerCase();
+		if (seen.has(key)) continue;
+		seen.add(key);
+		unique.push({ name: item.name, identifier: item.identifier });
+		if (unique.length >= limit) break;
+	}
+
+	return unique;
+}

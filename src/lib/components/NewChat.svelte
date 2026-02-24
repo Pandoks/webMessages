@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { refreshChatList } from '$lib/stores/sync.svelte.js';
+	import { pushState } from '$app/navigation';
 
 	let { open = $bindable(false) }: { open: boolean } = $props();
 
@@ -9,7 +10,7 @@
 	let error = $state('');
 
 	async function handleSend() {
-		if (!recipient.trim() || !message.trim()) return;
+		if (!recipient.trim()) return;
 		sending = true;
 		error = '';
 
@@ -24,14 +25,19 @@
 			});
 
 			if (!res.ok) {
-				error = 'Failed to send message';
+				const data = await res.json().catch(() => ({}));
+				error = data.error ?? 'Failed to send message';
 				return;
 			}
 
+			const data = await res.json();
 			open = false;
 			recipient = '';
 			message = '';
-			refreshChatList();
+			await refreshChatList();
+			if (typeof data.chatId === 'number') {
+				pushState(`/chat/${data.chatId}`, { chatId: data.chatId });
+			}
 		} catch {
 			error = 'Failed to send message';
 		} finally {
@@ -62,12 +68,12 @@
 			<div class="space-y-3">
 				<input
 					type="text"
-					placeholder="Phone number or email"
+					placeholder="Name, phone number, or email"
 					bind:value={recipient}
 					class="w-full rounded-lg bg-gray-100 px-4 py-2 text-sm outline-none placeholder:text-gray-400 focus:ring-2 focus:ring-blue-300"
 				/>
 				<textarea
-					placeholder="Message"
+					placeholder="Message (optional when chat already exists)"
 					bind:value={message}
 					rows="3"
 					class="w-full resize-none rounded-lg bg-gray-100 px-4 py-2 text-sm outline-none placeholder:text-gray-400 focus:ring-2 focus:ring-blue-300"
@@ -86,10 +92,10 @@
 					</button>
 					<button
 						onclick={handleSend}
-						disabled={sending || !recipient.trim() || !message.trim()}
+						disabled={sending || !recipient.trim()}
 						class="rounded-lg bg-blue-500 px-4 py-2 text-sm font-medium text-white hover:bg-blue-600 disabled:bg-gray-300"
 					>
-						{sending ? 'Sending...' : 'Send'}
+						{sending ? 'Working...' : 'Open / Send'}
 					</button>
 				</div>
 			</div>

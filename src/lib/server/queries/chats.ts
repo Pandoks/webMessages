@@ -2,6 +2,7 @@ import { getDb } from '../db.js';
 import { appleToUnixMs } from '../date-utils.js';
 import { getMessageText } from '../attributed-body.js';
 import type { Chat, Participant } from '$lib/types/index.js';
+import { isPhoneNumber, normalizePhone } from '$lib/utils/phone.js';
 
 interface ChatRow {
 	rowid: number;
@@ -27,10 +28,17 @@ interface HandleRow {
 	service: string;
 }
 
+interface DirectChatRow {
+	rowid: number;
+	guid: string;
+	handle_identifier: string;
+}
+
 // Cache prepared statements (created once, reused)
 let _chatListStmt: ReturnType<ReturnType<typeof getDb>['prepare']> | null = null;
 let _chatParticipantsStmt: ReturnType<ReturnType<typeof getDb>['prepare']> | null = null;
 let _chatByIdStmt: ReturnType<ReturnType<typeof getDb>['prepare']> | null = null;
+let _directChatsByHandleStmt: ReturnType<ReturnType<typeof getDb>['prepare']> | null = null;
 
 function chatListStmt() {
 	if (!_chatListStmt) {
@@ -123,6 +131,27 @@ function chatByIdStmt() {
 	return _chatByIdStmt;
 }
 
+function directChatsByHandleStmt() {
+	if (!_directChatsByHandleStmt) {
+		_directChatsByHandleStmt = getDb().prepare<[string], DirectChatRow>(`
+			SELECT
+				c.ROWID as rowid,
+				c.guid as guid,
+				h.id as handle_identifier
+			FROM chat c
+			JOIN chat_handle_join chj ON chj.chat_id = c.ROWID
+			JOIN handle h ON h.ROWID = chj.handle_id
+			WHERE c.style = 45
+				AND (
+					LOWER(h.id) = LOWER(?)
+					OR h.id LIKE '%' || ? || '%'
+				)
+			ORDER BY c.ROWID DESC
+		`);
+	}
+	return _directChatsByHandleStmt;
+}
+
 export function getChatList(): Chat[] {
 	const rows = (chatListStmt() as ReturnType<ReturnType<typeof getDb>['prepare']>).all() as ChatRow[];
 	return rows.map(rowToChat);
@@ -142,6 +171,32 @@ export function getChatById(chatId: number): Chat | null {
 	const row = (chatByIdStmt() as ReturnType<ReturnType<typeof getDb>['prepare']>).get(chatId) as ChatRow | undefined;
 	if (!row) return null;
 	return rowToChat(row);
+}
+
+export function findDirectChatByHandleIdentifier(
+	identifier: string
+): { rowid: number; guid: string } | null {
+	const needle = identifier.trim();
+	if (!needle) return null;
+
+	const rows = directChatsByHandleStmt().all(needle, needle) as DirectChatRow[];
+	if (rows.length === 0) return null;
+
+	const lowerNeedle = needle.toLowerCase();
+	const normalizedNeedle = isPhoneNumber(needle) ? normalizePhone(needle) : null;
+
+	// Prefer exact identifier match before fuzzy matching.
+	const exact = rows.find((row) => row.handle_identifier.toLowerCase() === lowerNeedle);
+	if (exact) return { rowid: exact.rowid, guid: exact.guid };
+
+	if (normalizedNeedle) {
+		const normalized = rows.find(
+			(row) => isPhoneNumber(row.handle_identifier) && normalizePhone(row.handle_identifier) === normalizedNeedle
+		);
+		if (normalized) return { rowid: normalized.rowid, guid: normalized.guid };
+	}
+
+	return { rowid: rows[0].rowid, guid: rows[0].guid };
 }
 
 function rowToChat(row: ChatRow): Chat {
