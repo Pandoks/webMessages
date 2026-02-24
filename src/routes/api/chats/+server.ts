@@ -2,6 +2,7 @@ import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { getChatList, getChatParticipants } from '$lib/server/queries/chats.js';
 import { getRelatedContactIdentifiers, resolveContact } from '$lib/server/contacts.js';
+import { getPinnedRank } from '$lib/server/pinning.js';
 import { isPhoneNumber, normalizePhone } from '$lib/utils/phone.js';
 import type { Chat, Participant } from '$lib/types/index.js';
 
@@ -47,6 +48,35 @@ function resolveDisplayName(chat: Chat, participants: Participant[]): string {
 	return resolveContact(chat.chat_identifier);
 }
 
+function pinCandidates(chat: Chat, participants: Participant[]): string[] {
+	const out: string[] = [];
+	const add = (value: string | null | undefined) => {
+		if (!value) return;
+		const trimmed = value.trim();
+		if (!trimmed) return;
+		if (out.includes(trimmed)) return;
+		out.push(trimmed);
+	};
+
+	add(chat.chat_identifier);
+	add(chat.guid);
+
+	// "any;-;<identifier>" / "any;+;<identifier>" guid format.
+	const guidParts = chat.guid.split(';');
+	if (guidParts.length >= 3) {
+		add(guidParts[guidParts.length - 1]);
+	}
+
+	// Contact-handle pins should only match direct chats.
+	if (chat.style === 45) {
+		for (const p of participants) {
+			add(p.handle_identifier);
+		}
+	}
+
+	return out;
+}
+
 export const GET: RequestHandler = () => {
 	const chats = getChatList();
 	const merged = new Map<string, MergedChat>();
@@ -61,6 +91,8 @@ export const GET: RequestHandler = () => {
 
 		chat.participants = participants;
 		chat.display_name = resolveDisplayName(chat, participants);
+		chat.pin_rank = getPinnedRank(pinCandidates(chat, participants));
+		chat.is_pinned = chat.pin_rank !== null;
 
 		const key = chat.style === 45 ? directMergeKey(participants) ?? `chat:${chat.rowid}` : `chat:${chat.rowid}`;
 		const existing = merged.get(key);
@@ -72,6 +104,14 @@ export const GET: RequestHandler = () => {
 				merged_chat_guids: [chat.guid]
 			});
 			continue;
+		}
+
+		existing.unread_count = (existing.unread_count ?? 0) + (chat.unread_count ?? 0);
+		const existingPinRank = existing.pin_rank ?? Number.POSITIVE_INFINITY;
+		const incomingPinRank = chat.pin_rank ?? Number.POSITIVE_INFINITY;
+		if (incomingPinRank < existingPinRank) {
+			existing.pin_rank = chat.pin_rank;
+			existing.is_pinned = chat.is_pinned;
 		}
 
 		const participantMap = new Map<string, Participant>();
@@ -108,7 +148,12 @@ export const GET: RequestHandler = () => {
 	}
 
 	const mergedChats = Array.from(merged.values()).sort(
-		(a, b) => (b.last_message?.date ?? 0) - (a.last_message?.date ?? 0)
+		(a, b) => {
+			const pinRankA = a.pin_rank ?? Number.POSITIVE_INFINITY;
+			const pinRankB = b.pin_rank ?? Number.POSITIVE_INFINITY;
+			if (pinRankA !== pinRankB) return pinRankA - pinRankB;
+			return (b.last_message?.date ?? 0) - (a.last_message?.date ?? 0);
+		}
 	);
 	return json({ chats: mergedChats });
 };

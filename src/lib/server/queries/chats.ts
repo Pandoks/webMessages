@@ -12,6 +12,7 @@ interface ChatRow {
 	service_name: string;
 	style: number;
 	is_archived: number;
+	unread_count: number;
 	last_message_rowid: number | null;
 	last_message_guid: string | null;
 	last_message_text: string | null;
@@ -40,6 +41,19 @@ let _chatParticipantsStmt: ReturnType<ReturnType<typeof getDb>['prepare']> | nul
 let _chatByIdStmt: ReturnType<ReturnType<typeof getDb>['prepare']> | null = null;
 let _directChatsByHandleStmt: ReturnType<ReturnType<typeof getDb>['prepare']> | null = null;
 
+const UNREAD_COUNT_SQL = `
+	(
+		SELECT COUNT(*)
+		FROM chat_message_join cmj_unread
+		JOIN message mu ON mu.ROWID = cmj_unread.message_id
+		WHERE cmj_unread.chat_id = c.ROWID
+			AND mu.is_from_me = 0
+			AND mu.associated_message_type = 0
+			AND NOT (mu.item_type != 0 AND mu.group_action_type = 0 AND mu.group_title IS NULL)
+			AND mu.date > COALESCE(c.last_read_message_timestamp, 0)
+	) as unread_count
+`;
+
 function chatListStmt() {
 	if (!_chatListStmt) {
 		_chatListStmt = getDb().prepare<[], ChatRow>(`
@@ -51,6 +65,7 @@ function chatListStmt() {
 				c.service_name,
 				c.style,
 				c.is_archived,
+				${UNREAD_COUNT_SQL},
 				m.ROWID as last_message_rowid,
 				m.guid as last_message_guid,
 				m.text as last_message_text,
@@ -104,6 +119,7 @@ function chatByIdStmt() {
 				c.service_name,
 				c.style,
 				c.is_archived,
+				${UNREAD_COUNT_SQL},
 				m.ROWID as last_message_rowid,
 				m.guid as last_message_guid,
 				m.text as last_message_text,
@@ -273,7 +289,7 @@ function rowToChat(row: ChatRow): Chat {
 		service_name: row.service_name,
 		style: row.style,
 		is_archived: row.is_archived === 1,
-		unread_count: 0,
+		unread_count: Math.max(0, row.unread_count || 0),
 		last_message:
 			row.last_message_rowid !== null
 				? {

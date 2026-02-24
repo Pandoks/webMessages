@@ -2,7 +2,18 @@ import Database from 'better-sqlite3';
 import { homedir } from 'os';
 import { join } from 'path';
 
-const DB_PATH = join(homedir(), 'Library', 'Messages', 'chat.db');
+function resolveDbPath(): string {
+	const configured = process.env.WEBMESSAGES_DB_PATH?.trim();
+	if (!configured) {
+		return join(homedir(), 'Library', 'Messages', 'chat.db');
+	}
+	if (configured === '~' || configured.startsWith('~/')) {
+		return join(homedir(), configured.slice(2));
+	}
+	return configured;
+}
+
+const DB_PATH = resolveDbPath();
 
 let db: Database.Database | null = null;
 

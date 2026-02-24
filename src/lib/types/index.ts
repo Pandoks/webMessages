@@ -39,6 +39,8 @@ export interface Chat {
 	service_name: string;
 	style: number; // 43=group, 45=1:1
 	is_archived: boolean;
+	is_pinned?: boolean;
+	pin_rank?: number | null;
 	last_message?: Message;
 	participants?: Participant[];
 	unread_count?: number;

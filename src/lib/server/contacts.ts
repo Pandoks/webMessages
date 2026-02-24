@@ -2,7 +2,7 @@ import { execFile, execFileSync } from 'child_process';
 import { promisify } from 'util';
 import { normalizePhone, isPhoneNumber, formatPhone } from '$lib/utils/phone.js';
 import type { Contact } from '$lib/types/index.js';
-import { existsSync, mkdirSync, readFileSync } from 'fs';
+import { existsSync, mkdirSync, readFileSync, statSync } from 'fs';
 import { readFile } from 'fs/promises';
 import { join } from 'path';
 
@@ -16,6 +16,12 @@ let loaded = false;
 let loading: Promise<boolean> | null = null;
 let photosLoaded = false;
 let contactsReadyBroadcasted = false;
+let backgroundRefreshTimer: ReturnType<typeof setInterval> | null = null;
+let refreshInFlight: Promise<void> | null = null;
+let lastRefreshStartedAt = 0;
+
+const CONTACT_REFRESH_INTERVAL_MS = 30 * 60 * 1000; // 30 minutes
+const MIN_RETRY_INTERVAL_MS = 60 * 1000; // 1 minute
 
 const PHOTO_CACHE_DIR = join(process.env.HOME ?? '', '.cache/webMessages/contact-photos');
 const NICKNAME_CACHE_DIR = join(
@@ -25,6 +31,7 @@ const NICKNAME_CACHE_DIR = join(
 
 // Path to the compiled Swift photo exporter (in project root/scripts/)
 const PHOTO_EXPORTER = join(process.cwd(), 'scripts/export-photos');
+const PHOTO_EXPORTER_SOURCE = join(process.cwd(), 'scripts/export-photos.swift');
 
 const APPLESCRIPT = `
 tell application "Contacts"
@@ -64,8 +71,61 @@ tell application "Contacts"
 end tell
 `;
 
-export async function loadContacts(): Promise<boolean> {
-	if (loaded) return true;
+function contactMapsEqual(a: Map<string, string>, b: Map<string, string>): boolean {
+	if (a.size !== b.size) return false;
+	for (const [key, value] of a) {
+		if (b.get(key) !== value) return false;
+	}
+	return true;
+}
+
+function photoMapsEqual(
+	a: Map<string, { path: string; mime: string }>,
+	b: Map<string, { path: string; mime: string }>
+): boolean {
+	if (a.size !== b.size) return false;
+	for (const [key, value] of a) {
+		const other = b.get(key);
+		if (!other) return false;
+		if (other.path !== value.path || other.mime !== value.mime) return false;
+	}
+	return true;
+}
+
+async function broadcastContactsReady(): Promise<void> {
+	const { broadcast } = await import('./watcher.js');
+	broadcast({ type: 'contacts_ready', data: {} });
+}
+
+function ensurePhotoExporterBuilt(): boolean {
+	if (!existsSync(PHOTO_EXPORTER_SOURCE)) return false;
+
+	let needsBuild = !existsSync(PHOTO_EXPORTER);
+	if (!needsBuild) {
+		try {
+			const sourceMtime = statSync(PHOTO_EXPORTER_SOURCE).mtimeMs;
+			const binaryMtime = statSync(PHOTO_EXPORTER).mtimeMs;
+			needsBuild = sourceMtime > binaryMtime;
+		} catch {
+			needsBuild = true;
+		}
+	}
+
+	if (!needsBuild) return true;
+
+	try {
+		execFileSync('swiftc', [PHOTO_EXPORTER_SOURCE, '-o', PHOTO_EXPORTER], {
+			timeout: 60000
+		});
+		return true;
+	} catch (err) {
+		console.error('Failed to compile export-photos helper:', err);
+		return existsSync(PHOTO_EXPORTER);
+	}
+}
+
+export async function loadContacts(force = false): Promise<boolean> {
+	if (!force && loaded) return true;
 	if (loading) return loading;
 
 	loading = (async () => {
@@ -76,7 +136,7 @@ export async function loadContacts(): Promise<boolean> {
 			});
 
 			const lines = stdout.split('\n').filter((l) => l.trim().length > 0);
-			contactMap = new Map();
+			const nextContactMap = new Map<string, string>();
 
 			for (const line of lines) {
 				const [name, phonesStr, emailsStr] = line.split('|');
@@ -84,49 +144,104 @@ export async function loadContacts(): Promise<boolean> {
 
 				if (phonesStr) {
 					for (const phone of phonesStr.split(',').filter((p) => p.trim())) {
-						contactMap.set(normalizePhone(phone.trim()), name.trim());
+						nextContactMap.set(normalizePhone(phone.trim()), name.trim());
 					}
 				}
 
 				if (emailsStr) {
 					for (const email of emailsStr.split(',').filter((e) => e.trim())) {
-						contactMap.set(email.trim().toLowerCase(), name.trim());
+						nextContactMap.set(email.trim().toLowerCase(), name.trim());
 					}
 				}
 			}
 
+			const changed = !contactMapsEqual(contactMap, nextContactMap);
+			contactMap = nextContactMap;
 			loaded = true;
-			console.log(`Loaded ${contactMap.size} contact identifiers`);
+			if (changed) {
+				console.log(`Loaded ${contactMap.size} contact identifiers`);
+			} else if (force) {
+				console.log(`Contacts unchanged (${contactMap.size} identifiers)`);
+			}
 			return true;
 		} catch (err) {
 			console.error('Failed to load contacts:', err);
-			loading = null; // Allow retry
 			return false;
+		} finally {
+			loading = null; // Allow refreshes/retries later
 		}
 	})();
 
 	return loading;
 }
 
+async function refreshContactsAndPhotos(force: boolean, source: 'request' | 'poll'): Promise<void> {
+	const now = Date.now();
+	const initialLoadPending = !loaded || !photosLoaded;
+
+	if (
+		source === 'request' &&
+		initialLoadPending &&
+		now - lastRefreshStartedAt < MIN_RETRY_INTERVAL_MS
+	) {
+		return;
+	}
+
+	if (refreshInFlight) {
+		return refreshInFlight;
+	}
+
+	refreshInFlight = (async () => {
+		lastRefreshStartedAt = Date.now();
+
+		const previousContacts = new Map(contactMap);
+		const previousPhotos = new Map(photoMap);
+
+		const contactsOk = await loadContacts(force);
+		if (!contactsOk) return;
+
+		await exportContactPhotos(force);
+
+		const contactsChanged = !contactMapsEqual(previousContacts, contactMap);
+		const photosChanged = !photoMapsEqual(previousPhotos, photoMap);
+
+		if (!contactsReadyBroadcasted) {
+			await broadcastContactsReady();
+			contactsReadyBroadcasted = true;
+			return;
+		}
+
+		if (contactsChanged || photosChanged) {
+			console.log(
+				`[contacts] Refresh detected changes (contacts=${contactsChanged ? 'yes' : 'no'}, photos=${photosChanged ? 'yes' : 'no'})`
+			);
+			await broadcastContactsReady();
+		}
+	})().catch((err) => {
+		console.error('Contacts/photo refresh error:', err);
+	}).finally(() => {
+		refreshInFlight = null;
+	});
+
+	return refreshInFlight;
+}
+
+function startBackgroundRefresh(): void {
+	if (backgroundRefreshTimer) return;
+
+	backgroundRefreshTimer = setInterval(() => {
+		void refreshContactsAndPhotos(true, 'poll');
+	}, CONTACT_REFRESH_INTERVAL_MS);
+
+	if (typeof backgroundRefreshTimer.unref === 'function') {
+		backgroundRefreshTimer.unref();
+	}
+}
+
 /** Kick off contact + photo loading in the background. Safe to call multiple times. */
 export function ensureContactsLoading(): void {
-	loadContacts()
-		.then(async (success) => {
-			if (success) {
-				// Notify clients once per process startup that contacts are ready.
-				// Without this guard, every request would rebroadcast contacts_ready.
-				if (!contactsReadyBroadcasted) {
-					const { broadcast } = await import('./watcher.js');
-					broadcast({ type: 'contacts_ready', data: {} });
-					contactsReadyBroadcasted = true;
-				}
-
-				exportContactPhotos().catch((err) =>
-					console.error('Photo export error:', err)
-				);
-			}
-		})
-		.catch(() => {});
+	startBackgroundRefresh();
+	void refreshContactsAndPhotos(false, 'request');
 }
 
 /** Wait for contacts to finish loading (with optional timeout). Returns true if contacts are available. */
@@ -150,7 +265,7 @@ export function contactsLoaded(): boolean {
  * These are the photos people share via "Share Name and Photo" in iMessage.
  * Stored as PNG files at ~/Library/Messages/NickNameCache/{hash}-ad
  */
-function loadNickNamePhotos(): number {
+function loadNickNamePhotos(targetMap: Map<string, { path: string; mime: string }>): number {
 	if (!existsSync(NICKNAME_CACHE_DIR)) return 0;
 
 	let count = 0;
@@ -212,9 +327,9 @@ function loadNickNamePhotos(): number {
 					const entry = { path: imgPath, mime: 'image/png' };
 
 					if (identifier.includes('@')) {
-						photoMap.set(identifier.toLowerCase(), entry);
+						targetMap.set(identifier.toLowerCase(), entry);
 					} else if (isPhoneNumber(identifier)) {
-						photoMap.set(normalizePhone(identifier), entry);
+						targetMap.set(normalizePhone(identifier), entry);
 					}
 
 					count++;
@@ -233,70 +348,79 @@ function loadNickNamePhotos(): number {
 let photosLoading: Promise<void> | null = null;
 
 /** Export contact photos. Loads iMessage NickNameCache photos + Apple Contacts photos. */
-export async function exportContactPhotos(): Promise<void> {
-	if (photosLoaded) return;
+export async function exportContactPhotos(force = false): Promise<void> {
+	if (!force && photosLoaded) return;
 	if (photosLoading) return photosLoading;
 
 	photosLoading = (async () => {
-	photoMap = new Map();
+		const nextPhotoMap = new Map<string, { path: string; mime: string }>();
 
-	// 1. Load iMessage shared profile photos (NickNameCache) — fast, local PNGs
-	const nicknameCount = loadNickNamePhotos();
-	console.log(`Loaded ${nicknameCount} iMessage shared profile photos`);
+		// 1. Load iMessage shared profile photos (NickNameCache) — fast, local PNGs
+		const nicknameCount = loadNickNamePhotos(nextPhotoMap);
+		console.log(`Loaded ${nicknameCount} iMessage shared profile photos`);
 
-	// 2. Load Apple Contacts photos via Swift helper — fills gaps
-	try {
-		mkdirSync(PHOTO_CACHE_DIR, { recursive: true });
+		// 2. Load Apple Contacts photos via Swift helper — fills gaps
+		try {
+			mkdirSync(PHOTO_CACHE_DIR, { recursive: true });
+			const exporterReady = ensurePhotoExporterBuilt();
+			if (exporterReady && existsSync(PHOTO_EXPORTER)) {
+				const { stdout } = await execFileAsync(PHOTO_EXPORTER, [PHOTO_CACHE_DIR], {
+					timeout: 60000,
+					maxBuffer: 10 * 1024 * 1024
+				});
 
-		if (existsSync(PHOTO_EXPORTER)) {
-			const { stdout } = await execFileAsync(PHOTO_EXPORTER, [PHOTO_CACHE_DIR], {
-				timeout: 60000,
-				maxBuffer: 10 * 1024 * 1024
-			});
+				const lines = stdout.split('\n').filter((l) => l.trim().length > 0);
+				let contactPhotoCount = 0;
 
-			const lines = stdout.split('\n').filter((l) => l.trim().length > 0);
-			let contactPhotoCount = 0;
+				for (const line of lines) {
+					const [sanitizedId, phonesStr, emailsStr] = line.split('|');
+					if (!sanitizedId) continue;
 
-			for (const line of lines) {
-				const [sanitizedId, phonesStr, emailsStr] = line.split('|');
-				if (!sanitizedId) continue;
+					const photoPath = join(PHOTO_CACHE_DIR, `${sanitizedId}.jpeg`);
+					if (!existsSync(photoPath)) continue;
 
-				const photoPath = join(PHOTO_CACHE_DIR, `${sanitizedId}.jpeg`);
-				if (!existsSync(photoPath)) continue;
+					const entry = { path: photoPath, mime: 'image/jpeg' };
 
-				const entry = { path: photoPath, mime: 'image/jpeg' };
+					// Only add if not already covered by NickNameCache
+					if (phonesStr) {
+						for (const phone of phonesStr.split(',').filter((p) => p.trim())) {
+							const key = normalizePhone(phone.trim());
+							if (!nextPhotoMap.has(key)) {
+								nextPhotoMap.set(key, entry);
+								contactPhotoCount++;
+							}
+						}
+					}
 
-				// Only add if not already covered by NickNameCache
-				if (phonesStr) {
-					for (const phone of phonesStr.split(',').filter((p) => p.trim())) {
-						const key = normalizePhone(phone.trim());
-						if (!photoMap.has(key)) {
-							photoMap.set(key, entry);
-							contactPhotoCount++;
+					if (emailsStr) {
+						for (const email of emailsStr.split(',').filter((e) => e.trim())) {
+							const key = email.trim().toLowerCase();
+							if (!nextPhotoMap.has(key)) {
+								nextPhotoMap.set(key, entry);
+								contactPhotoCount++;
+							}
 						}
 					}
 				}
 
-				if (emailsStr) {
-					for (const email of emailsStr.split(',').filter((e) => e.trim())) {
-						const key = email.trim().toLowerCase();
-						if (!photoMap.has(key)) {
-							photoMap.set(key, entry);
-							contactPhotoCount++;
-						}
-					}
-				}
+				console.log(`Loaded ${contactPhotoCount} additional Apple Contacts photos`);
 			}
-
-			console.log(`Loaded ${contactPhotoCount} additional Apple Contacts photos`);
+		} catch (err) {
+			console.error('Failed to export Apple Contacts photos:', err);
 		}
-	} catch (err) {
-		console.error('Failed to export Apple Contacts photos:', err);
-	}
 
-	photosLoaded = true;
-	console.log(`Total photo mappings: ${photoMap.size}`);
-	})();
+		const changed = !photoMapsEqual(photoMap, nextPhotoMap);
+		photoMap = nextPhotoMap;
+		photosLoaded = true;
+
+		if (changed) {
+			console.log(`Total photo mappings: ${photoMap.size}`);
+		} else if (force) {
+			console.log(`Contact photos unchanged (${photoMap.size} mappings)`);
+		}
+		})().finally(() => {
+			photosLoading = null;
+		});
 
 	return photosLoading;
 }

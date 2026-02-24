@@ -10,7 +10,8 @@
 		loadOlderMessages,
 		addOptimisticMessage,
 		removeOptimisticMessage,
-		applyLocalMessageEdit
+		applyLocalMessageEdit,
+		refreshChatList
 	} from '$lib/stores/sync.svelte.js';
 	import type { Message } from '$lib/types/index.js';
 
@@ -56,7 +57,15 @@
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({ chatGuid: chat.guid })
-			}).catch(() => {});
+			})
+				.then(async (res) => {
+					if (!res.ok) return;
+					const payload = await res.json().catch(() => null);
+					if (!payload || payload.success !== false) {
+						refreshChatList();
+					}
+				})
+				.catch(() => {});
 		}
 	});
 

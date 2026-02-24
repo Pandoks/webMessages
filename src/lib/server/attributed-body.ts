@@ -37,6 +37,13 @@ function looksLikeAttributedMetadata(s: string): boolean {
 	);
 }
 
+/** Some payloads expose marker fragments like "-/" before the real body text. */
+function isLowConfidenceParsedText(s: string): boolean {
+	const trimmed = s.trim();
+	if (!trimmed) return true;
+	return /^[\s\-\/]+$/u.test(trimmed) && trimmed.includes('-') && trimmed.includes('/');
+}
+
 /** Check if a small tail string is a typedstream suffix (digits, *, replacement chars, control) */
 function isTypedstreamTailSuffix(s: string): boolean {
 	if (!s) return true;
@@ -270,7 +277,11 @@ export function parseAttributedBody(blob: Buffer | null): string | null {
 	try {
 		// Strategy 1: Extract NSString payload (finds longest valid candidate)
 		const candidate = extractNSStringPayload(blob);
-		if (candidate) return candidate;
+		let lowConfidenceCandidate: string | null = null;
+		if (candidate) {
+			if (!isLowConfidenceParsedText(candidate)) return candidate;
+			lowConfidenceCandidate = candidate;
+		}
 
 		// Strategy 2: Broad fallback - strip nulls, find NSString, cleanup
 		const s = blob.toString('utf-8').replace(/\0/g, '');
@@ -287,7 +298,7 @@ export function parseAttributedBody(blob: Buffer | null): string | null {
 		const fullClean = cleanupTypedstreamText(s, true);
 		if (fullClean && !looksLikeAttributedMetadata(fullClean)) return fullClean;
 
-		return null;
+		return lowConfidenceCandidate;
 	} catch {
 		return null;
 	}

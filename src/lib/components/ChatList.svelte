@@ -7,6 +7,17 @@
 	let showNewChat = $state(false);
 
 	const filteredChats = $derived.by(() => chats);
+	const pinnedChats = $derived.by(() => {
+		return filteredChats
+			.filter((chat) => !!chat.is_pinned)
+			.sort((a, b) => {
+				const rankA = a.pin_rank ?? Number.POSITIVE_INFINITY;
+				const rankB = b.pin_rank ?? Number.POSITIVE_INFINITY;
+				if (rankA !== rankB) return rankA - rankB;
+				return (b.last_message?.date ?? 0) - (a.last_message?.date ?? 0);
+			});
+	});
+	const unpinnedChats = $derived.by(() => filteredChats.filter((chat) => !chat.is_pinned));
 </script>
 
 <div class="flex h-full flex-col border-r border-gray-200 bg-white">
@@ -26,9 +37,22 @@
 		</div>
 	</div>
 
-	<!-- Chat list -->
-	<div class="flex-1 overflow-y-auto">
-		{#each filteredChats as chat (chat.rowid)}
+	{#if pinnedChats.length > 0}
+		<div class="shrink-0 border-b border-gray-200 bg-white">
+			<div class="px-4 py-2 text-[11px] font-semibold uppercase tracking-wide text-gray-400">
+				Pinned
+			</div>
+			<div class="max-h-72 overflow-y-auto">
+				{#each pinnedChats as chat (chat.rowid)}
+					<ChatListItem {chat} {navigatingToChatId} />
+				{/each}
+			</div>
+		</div>
+	{/if}
+
+	<!-- Unpinned chat list -->
+	<div class="min-h-0 flex-1 overflow-y-auto">
+		{#each unpinnedChats as chat (chat.rowid)}
 			<ChatListItem {chat} {navigatingToChatId} />
 		{/each}
 		{#if filteredChats.length === 0}
@@ -41,10 +65,6 @@
 					</div>
 				</div>
 			{/each}
-		{:else if filteredChats.length === 0}
-			<div class="p-4 text-center text-sm text-gray-400">
-				No conversations found
-			</div>
 		{/if}
 	</div>
 </div>

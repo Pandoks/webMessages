@@ -1,9 +1,5 @@
 declare global {
-	namespace App {
-		interface Locals {
-			ip: string;
-		}
-	}
+	namespace App {}
 }
 
 export {};
