@@ -2,7 +2,7 @@ import { execFile, execFileSync } from 'child_process';
 import { promisify } from 'util';
 import { normalizePhone, isPhoneNumber, formatPhone } from '$lib/utils/phone.js';
 import type { Contact } from '$lib/types/index.js';
-import { existsSync, mkdirSync, readdirSync, readFileSync } from 'fs';
+import { existsSync, mkdirSync, readFileSync } from 'fs';
 import { readFile } from 'fs/promises';
 import { join } from 'path';
 
@@ -379,6 +379,11 @@ export interface ContactMatch {
 	identifier: string;
 }
 
+export interface ContactGroupMatch {
+	name: string;
+	identifiers: string[];
+}
+
 /** Find contact identifiers by display name query (exact > prefix > contains). */
 export function findContactMatches(query: string, limit = 5): ContactMatch[] {
 	const q = query.trim().toLowerCase();
@@ -418,5 +423,62 @@ export function findContactMatches(query: string, limit = 5): ContactMatch[] {
 		if (unique.length >= limit) break;
 	}
 
+	return unique;
+}
+
+/** Find contacts by display name query (exact > prefix > contains), grouped by person. */
+export function findContactGroupMatches(query: string, limit = 5): ContactGroupMatch[] {
+	const q = query.trim().toLowerCase();
+	if (!q) return [];
+
+	const candidates: Array<{ score: number; name: string; identifiers: string[] }> = [];
+	const contacts = getAllContacts();
+	for (const contact of contacts) {
+		const name = contact.name.trim();
+		if (!name) continue;
+		const lower = name.toLowerCase();
+
+		let score = 0;
+		if (lower === q) score = 3;
+		else if (lower.startsWith(q)) score = 2;
+		else if (lower.includes(q)) score = 1;
+		if (score === 0) continue;
+
+		const identifiers = [...contact.phones, ...contact.emails].filter((v) => !!v);
+		if (identifiers.length === 0) continue;
+		candidates.push({ score, name: contact.name, identifiers });
+	}
+
+	candidates.sort((a, b) => b.score - a.score || a.name.localeCompare(b.name));
+	return candidates.slice(0, limit).map((item) => ({
+		name: item.name,
+		identifiers: item.identifiers
+	}));
+}
+
+/** Return all known identifiers for the same contact as this phone/email. */
+export function getRelatedContactIdentifiers(identifier: string): string[] {
+	const input = identifier.trim();
+	if (!input) return [];
+
+	const lower = input.toLowerCase();
+	let name = contactMap.get(lower);
+	if (!name && isPhoneNumber(input)) {
+		name = contactMap.get(normalizePhone(input));
+	}
+	if (!name) return [input];
+
+	const contact = getAllContacts().find((c) => c.name === name);
+	if (!contact) return [input];
+
+	const ids = [...contact.phones, ...contact.emails]
+		.map((v) => v.trim())
+		.filter((v) => !!v);
+	if (ids.length === 0) return [input];
+
+	const unique = Array.from(new Set(ids.map((v) => v.toLowerCase()))).map(
+		(key) => ids.find((v) => v.toLowerCase() === key)!
+	);
+	if (!unique.some((v) => v.toLowerCase() === lower)) unique.push(input);
 	return unique;
 }

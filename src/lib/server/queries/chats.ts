@@ -199,6 +199,22 @@ export function findDirectChatByHandleIdentifier(
 	return { rowid: rows[0].rowid, guid: rows[0].guid };
 }
 
+export function findLatestDirectChatByHandleIdentifiers(
+	identifiers: string[]
+): { rowid: number; guid: string } | null {
+	let latest: { rowid: number; guid: string } | null = null;
+
+	for (const identifier of identifiers) {
+		const match = findDirectChatByHandleIdentifier(identifier);
+		if (!match) continue;
+		if (!latest || match.rowid > latest.rowid) {
+			latest = match;
+		}
+	}
+
+	return latest;
+}
+
 function rowToChat(row: ChatRow): Chat {
 	const lastMessageText =
 		row.last_message_rowid !== null

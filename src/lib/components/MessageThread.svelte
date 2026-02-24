@@ -11,7 +11,9 @@
 		hasMore = false,
 		loading = false,
 		onReact,
-		onReply
+		onReply,
+		onEdit,
+		onUnsend
 	}: {
 		messages: Message[];
 		isGroup?: boolean;
@@ -20,6 +22,8 @@
 		loading?: boolean;
 		onReact?: (message: Message, reactionType: number) => void;
 		onReply?: (message: Message) => void;
+		onEdit?: (message: Message) => void;
+		onUnsend?: (message: Message) => void;
 	} = $props();
 
 	let scrollContainer: HTMLDivElement | undefined = $state();
@@ -77,43 +81,52 @@
 		return prevMsg.is_from_me || prevMsg.sender !== msg.sender;
 	}
 
+	function isUnsent(msg: Message): boolean {
+		return !!(msg.date_retracted && msg.date_retracted > 0);
+	}
+
 	// Compute delivery status labels (iMessage-style: "Read" at transition, status at end)
 	const statusMap = $derived.by(() => {
 		const map = new Map<number, string>();
 		if (!messages.length) return map;
 
-		// Find the trailing block of consecutive sent messages (no received messages after)
-		let trailingStart = messages.length;
+		// Find the trailing block of sent messages, ignoring unsent rows.
+		// Unsent rows can have is_read=true in chat.db, which should not drive status labels.
+		const trailingSentIndexes: number[] = [];
 		for (let i = messages.length - 1; i >= 0; i--) {
-			if (!messages[i].is_from_me) break;
-			trailingStart = i;
+			const msg = messages[i];
+			if (!msg.is_from_me) break;
+			if (!isUnsent(msg)) trailingSentIndexes.push(i);
 		}
-		if (trailingStart === messages.length) return map;
+		if (trailingSentIndexes.length === 0) return map;
+		trailingSentIndexes.reverse();
 
 		// Find the last read message in the trailing block
 		let lastReadIdx = -1;
-		for (let i = messages.length - 1; i >= trailingStart; i--) {
-			if (messages[i].is_read) {
-				lastReadIdx = i;
+		for (let i = trailingSentIndexes.length - 1; i >= 0; i--) {
+			const msgIdx = trailingSentIndexes[i];
+			if (messages[msgIdx].is_read) {
+				lastReadIdx = msgIdx;
 				break;
 			}
 		}
 
 		// Show "Read" at the last read message if there are non-read messages after it
-		if (lastReadIdx !== -1 && lastReadIdx < messages.length - 1) {
+		const lastStatusIdx = trailingSentIndexes[trailingSentIndexes.length - 1];
+		if (lastReadIdx !== -1 && lastReadIdx < lastStatusIdx) {
 			map.set(lastReadIdx, 'Read');
 		}
 
-		// Show status on the very last message
-		const last = messages[messages.length - 1];
+		// Show status on the latest non-unsent outgoing message
+		const last = messages[lastStatusIdx];
 		if (last.is_read) {
-			map.set(messages.length - 1, 'Read');
+			map.set(lastStatusIdx, 'Read');
 		} else if (last.is_delivered) {
-			map.set(messages.length - 1, 'Delivered');
+			map.set(lastStatusIdx, 'Delivered');
 		} else if (last.is_sent) {
-			map.set(messages.length - 1, 'Sent');
+			map.set(lastStatusIdx, 'Sent');
 		} else if (last.rowid < 0) {
-			map.set(messages.length - 1, 'Sending...');
+			map.set(lastStatusIdx, 'Sending...');
 		}
 
 		return map;
@@ -165,6 +178,8 @@
 		y={contextMenu.y}
 		onReact={(msg, type) => { onReact?.(msg, type); contextMenu = null; }}
 		onReply={(msg) => { onReply?.(msg); contextMenu = null; }}
+		onEdit={(msg) => { onEdit?.(msg); contextMenu = null; }}
+		onUnsend={(msg) => { onUnsend?.(msg); contextMenu = null; }}
 		onClose={() => { contextMenu = null; }}
 	/>
 {/if}

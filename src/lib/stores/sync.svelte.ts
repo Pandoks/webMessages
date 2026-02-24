@@ -7,7 +7,10 @@ import {
 	appendMessage,
 	prependMessages,
 	removeMessage,
+	removeMatchingOptimisticMessage,
 	updateMessageReactions,
+	updateMessageBody,
+	markMessageRetracted,
 	setParticipants
 } from './chats.svelte.js';
 import {
@@ -176,8 +179,18 @@ function handleNewMessages(events: { chatId: number; message: Message }[]) {
 					);
 				}
 			}
+		} else if (message.associated_message_type === 1000) {
+			// Edit event — update target message body in place
+			if (message.associated_message_guid) {
+				const parsed = parseAssociatedGuid(message.associated_message_guid);
+				const editedText = message.body ?? message.text ?? '';
+				if (parsed && editedText.trim().length > 0) {
+					updateMessageBody(chatId, parsed.guid, editedText, Date.now());
+				}
+			}
 		} else {
 			// Regular message — append to store and cache
+			removeMatchingOptimisticMessage(chatId, message);
 			appendMessage(chatId, message);
 			cacheMessages([message]);
 			updateChatLastMessage(chatId, message);
@@ -215,6 +228,16 @@ export function addOptimisticMessage(chatId: number, message: Message) {
 /** Remove an optimistic message on send failure */
 export function removeOptimisticMessage(chatId: number, guid: string) {
 	removeMessage(chatId, guid);
+}
+
+/** Apply local in-thread message edit immediately. */
+export function applyLocalMessageEdit(chatId: number, messageGuid: string, text: string) {
+	updateMessageBody(chatId, messageGuid, text, Date.now());
+}
+
+/** Apply local unsend/retract immediately. */
+export function applyLocalMessageUnsend(chatId: number, messageGuid: string) {
+	markMessageRetracted(chatId, messageGuid, Date.now());
 }
 
 /** Handle SSE reconnection — refresh data to catch missed messages */

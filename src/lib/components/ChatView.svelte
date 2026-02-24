@@ -9,7 +9,8 @@
 		loadChat,
 		loadOlderMessages,
 		addOptimisticMessage,
-		removeOptimisticMessage
+		removeOptimisticMessage,
+		applyLocalMessageEdit
 	} from '$lib/stores/sync.svelte.js';
 	import type { Message } from '$lib/types/index.js';
 
@@ -22,7 +23,8 @@
 	let loadingOlder = $state(false);
 	let hasMore = $state(true);
 	let replyingTo: Message | null = $state(null);
-	let replyFocusToken = $state(0);
+	let editingMessage: Message | null = $state(null);
+	let composerFocusToken = $state(0);
 	let lastLoadedChatId: number | null = $state(null);
 
 	const chat = $derived(chatStore.chats.find((c) => c.rowid === chatId) ?? null);
@@ -38,6 +40,7 @@
 		hasMore = true;
 		loadingOlder = false;
 		replyingTo = null;
+		editingMessage = null;
 		// Prevent loadChat internals from becoming effect dependencies.
 		untrack(() => {
 			loadChat(id);
@@ -106,6 +109,33 @@
 	async function handleSend(text: string) {
 		if (!chat) return;
 		sending = true;
+		const editTarget = editingMessage;
+		const editGuid = editTarget?.guid ?? null;
+		if (editTarget && editGuid) {
+			try {
+				const res = await fetch('/api/edit', {
+					method: 'POST',
+					headers: { 'Content-Type': 'application/json' },
+					body: JSON.stringify({
+						chatGuid: chat.guid,
+						messageGuid: editGuid,
+						text
+					})
+				});
+				if (!res.ok) {
+					console.error('Failed to edit message');
+					return;
+				}
+				applyLocalMessageEdit(chatId, editGuid, text);
+				editingMessage = null;
+			} catch (err) {
+				console.error('Edit error:', err);
+			} finally {
+				sending = false;
+			}
+			return;
+		}
+
 		const isReply = !!replyingTo;
 		const replyGuid = replyingTo?.guid ?? null;
 		const optimistic: Message = {
@@ -186,8 +216,39 @@
 			loading={loadingOlder}
 			onReact={handleReact}
 			onReply={(msg) => {
+				editingMessage = null;
 				replyingTo = msg;
-				replyFocusToken += 1;
+				composerFocusToken += 1;
+			}}
+			onEdit={(msg) => {
+				replyingTo = null;
+				editingMessage = msg;
+				composerFocusToken += 1;
+			}}
+			onUnsend={async (msg) => {
+				if (!chat) return;
+				try {
+					const res = await fetch('/api/unsend', {
+						method: 'POST',
+						headers: { 'Content-Type': 'application/json' },
+						body: JSON.stringify({
+							chatGuid: chat.guid,
+							messageGuid: msg.guid
+						})
+					});
+					if (!res.ok) {
+						const payload = await res.json().catch(() => ({}));
+						console.error('Failed to unsend message:', payload.error ?? res.statusText);
+						return;
+					}
+					// Do not optimistic-unsend locally; wait for DB/SSE truth.
+					// Force refresh shortly after bridge reports success.
+					setTimeout(() => {
+						loadChat(chatId);
+					}, 1200);
+				} catch (err) {
+					console.error('Unsend error:', err);
+				}
 			}}
 		/>
 		<MessageInput
@@ -196,8 +257,10 @@
 			disabled={sending}
 			offline={!connection.connected}
 			replyTo={replyingTo ?? undefined}
-			focusToken={replyFocusToken}
+			editTo={editingMessage ?? undefined}
+			focusToken={composerFocusToken}
 			onCancelReply={() => { replyingTo = null; }}
+			onCancelEdit={() => { editingMessage = null; }}
 		/>
 	</div>
 {/if}

@@ -7,6 +7,8 @@
 		y,
 		onReact,
 		onReply,
+		onEdit,
+		onUnsend,
 		onClose
 	}: {
 		message: Message;
@@ -14,6 +16,8 @@
 		y: number;
 		onReact: (message: Message, reactionType: number) => void;
 		onReply: (message: Message) => void;
+		onEdit?: (message: Message) => void;
+		onUnsend?: (message: Message) => void;
 		onClose: () => void;
 	} = $props();
 
@@ -31,7 +35,7 @@
 
 	// Clamp position to viewport
 	const menuWidth = 200;
-	const menuHeight = 160;
+	const menuHeight = 220;
 	const clampedX = $derived(Math.min(x, window.innerWidth - menuWidth - 8));
 	const clampedY = $derived(Math.min(y, window.innerHeight - menuHeight - 8));
 	const imageUtis = new Set(['public.heic', 'public.heif', 'public.jpeg', 'public.png', 'public.gif', 'public.webp']);
@@ -40,6 +44,13 @@
 		(message.attachments ?? []).some((attachment) => isImageAttachment(attachment))
 	);
 	const copyLabel = $derived(hasImageAttachment ? 'Copy Image' : 'Copy Text');
+	const undoSendWindowMs = 2 * 60 * 1000;
+	const canUnsend = $derived(
+		message.is_from_me &&
+			!message.date_retracted &&
+			message.service === 'iMessage' &&
+			Date.now() - message.date <= undoSendWindowMs
+	);
 
 	function handleReact(type: number) {
 		onReact(message, type);
@@ -47,6 +58,14 @@
 
 	function handleReply() {
 		onReply(message);
+	}
+
+	function handleEdit() {
+		onEdit?.(message);
+	}
+
+	function handleUnsend() {
+		onUnsend?.(message);
 	}
 
 	function isImageAttachment(attachment: Attachment): boolean {
@@ -225,6 +244,31 @@
 				</svg>
 				Reply
 			</button>
+			{#if message.is_from_me && !message.date_retracted && (message.body ?? '').trim().length > 0 && (!message.attachments || message.attachments.length === 0)}
+				<button
+					onclick={handleEdit}
+					class="flex w-full items-center gap-3 px-4 py-2.5 text-left text-sm text-gray-700 hover:bg-gray-50"
+				>
+					<svg class="h-5 w-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+						<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16.862 4.487a2.1 2.1 0 113 2.97L9 18.319 5 19l.682-4 11.18-10.513z" />
+					</svg>
+					Edit
+				</button>
+			{/if}
+			{#if message.is_from_me && !message.date_retracted}
+				<button
+					onclick={handleUnsend}
+					disabled={!canUnsend}
+					class="flex w-full items-center gap-3 px-4 py-2.5 text-left text-sm text-red-600 hover:bg-red-50"
+					class:opacity-50={!canUnsend}
+					class:cursor-not-allowed={!canUnsend}
+				>
+					<svg class="h-5 w-5 text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+						<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 7h12M9 7V5h6v2m-7 3v7m4-7v7m4-7v7M5 7h14l-1 12H6L5 7z" />
+					</svg>
+					{canUnsend ? 'Undo Send' : 'Undo Send (expired)'}
+				</button>
+			{/if}
 			<button
 				onclick={handleCopy}
 				class="flex w-full items-center gap-3 px-4 py-2.5 text-left text-sm text-gray-700 hover:bg-gray-50"

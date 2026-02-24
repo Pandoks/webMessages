@@ -6,7 +6,14 @@ export const GET: RequestHandler = async ({ params }) => {
 	const photo = await getContactPhoto(identifier);
 
 	if (!photo) {
-		return new Response(null, { status: 404 });
+		// No photo for this identifier is expected for many handles.
+		// Return 204 to avoid noisy 404 error logs in browser devtools.
+		return new Response(null, {
+			status: 204,
+			headers: {
+				'Cache-Control': 'public, max-age=3600'
+			}
+		});
 	}
 
 	return new Response(photo.data, {

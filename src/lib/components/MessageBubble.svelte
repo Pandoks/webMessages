@@ -80,7 +80,7 @@
 						<span class="whitespace-pre-wrap [overflow-wrap:anywhere]">{displayText}</span>
 					{/if}
 
-					{#if isEdited}
+					{#if isEdited && !isRetracted}
 						<span class="ml-1 text-[10px] {isSent ? 'text-blue-200' : 'text-gray-400'}">Edited</span>
 					{/if}
 				</div>

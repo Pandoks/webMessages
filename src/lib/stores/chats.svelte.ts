@@ -106,6 +106,32 @@ export function removeMessage(chatId: number, guid: string) {
 	messageMemoryCache = next;
 }
 
+/** Remove one optimistic temp message that matches a confirmed server message. */
+export function removeMatchingOptimisticMessage(chatId: number, message: Message) {
+	const existing = messageMemoryCache.get(chatId);
+	if (!existing) return;
+	if (!message.is_from_me) return;
+
+	const normalizedBody = (message.body ?? message.text ?? '').trim();
+	if (!normalizedBody) return;
+
+	// Find nearest optimistic sent message with same text in a short window.
+	const idx = existing.findIndex((m) => {
+		if (!m.is_from_me) return false;
+		if (m.rowid >= 0) return false;
+		const optimisticBody = (m.body ?? m.text ?? '').trim();
+		if (optimisticBody !== normalizedBody) return false;
+		return Math.abs(m.date - message.date) < 120_000;
+	});
+	if (idx === -1) return;
+
+	const next = new Map(messageMemoryCache);
+	const updated = [...existing];
+	updated.splice(idx, 1);
+	next.set(chatId, updated);
+	messageMemoryCache = next;
+}
+
 /** Incrementally update reactions on a specific message */
 export function updateMessageReactions(
 	chatId: number,
@@ -144,6 +170,64 @@ export function updateMessageReactions(
 	const next = new Map(messageMemoryCache);
 	next.set(chatId, updatedMessages);
 	messageMemoryCache = next;
+}
+
+/** Update message body text locally (used for edits). */
+export function updateMessageBody(chatId: number, messageGuid: string, body: string, editedAt = Date.now()) {
+	const existing = messageMemoryCache.get(chatId);
+	if (!existing) return;
+
+	const msgIdx = existing.findIndex((m) => m.guid === messageGuid);
+	if (msgIdx === -1) return;
+
+	const msg = existing[msgIdx];
+	const updatedMsg: Message = {
+		...msg,
+		text: body,
+		body,
+		date_edited: editedAt
+	};
+
+	const updatedMessages = [...existing];
+	updatedMessages[msgIdx] = updatedMsg;
+
+	const next = new Map(messageMemoryCache);
+	next.set(chatId, updatedMessages);
+	messageMemoryCache = next;
+
+	const chat = chats.find((c) => c.rowid === chatId);
+	if (chat?.last_message?.guid === messageGuid) {
+		updateChatLastMessage(chatId, updatedMsg);
+	}
+}
+
+/** Mark message as unsent/retracted locally. */
+export function markMessageRetracted(chatId: number, messageGuid: string, retractedAt = Date.now()) {
+	const existing = messageMemoryCache.get(chatId);
+	if (!existing) return;
+
+	const msgIdx = existing.findIndex((m) => m.guid === messageGuid);
+	if (msgIdx === -1) return;
+
+	const msg = existing[msgIdx];
+	const updatedMsg: Message = {
+		...msg,
+		date_retracted: retractedAt,
+		text: '',
+		body: ''
+	};
+
+	const updatedMessages = [...existing];
+	updatedMessages[msgIdx] = updatedMsg;
+
+	const next = new Map(messageMemoryCache);
+	next.set(chatId, updatedMessages);
+	messageMemoryCache = next;
+
+	const chat = chats.find((c) => c.rowid === chatId);
+	if (chat?.last_message?.guid === messageGuid) {
+		updateChatLastMessage(chatId, updatedMsg);
+	}
 }
 
 /** Set participants for a chat */

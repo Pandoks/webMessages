@@ -8,8 +8,20 @@
 	let photoFailed = $state(false);
 	let photoLoaded = $state(false);
 
+	function isLikelyContactIdentifier(value: string): boolean {
+		const v = value.trim();
+		if (!v) return false;
+		// Email
+		if (v.includes('@')) return true;
+		// Phone-like (reject plain short numeric IDs like DB rowids)
+		if (/^\+?\d[\d\s().-]{6,}$/.test(v)) return true;
+		return false;
+	}
+
 	const photoUrl = $derived(
-		identifier ? `/api/contacts/photo/${encodeURIComponent(identifier)}` : null
+		identifier && isLikelyContactIdentifier(identifier)
+			? `/api/contacts/photo/${encodeURIComponent(identifier)}`
+			: null
 	);
 
 	// Reset photo state when identifier changes

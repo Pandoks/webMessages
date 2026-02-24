@@ -9,6 +9,7 @@ const RESP_PATH = join(homedir(), '.webmessages-resp.json');
 const POLL_INTERVAL = 100;
 const DEFAULT_TIMEOUT = 8000;
 const REPLY_TIMEOUT = 15000;
+const MARK_READ_TIMEOUT = 15000;
 
 // Promise queue to serialize commands
 let commandQueue = Promise.resolve<unknown>(undefined);
@@ -27,6 +28,7 @@ interface IMCoreResponse {
 	id: string;
 	success: boolean;
 	error?: string;
+	[key: string]: unknown;
 }
 
 function sleep(ms: number): Promise<void> {
@@ -93,6 +95,40 @@ export async function sendReaction(
 	}
 }
 
+export async function sendUnsend(
+	chatGuid: string,
+	messageGuid: string
+): Promise<void> {
+	const response = await enqueue(() =>
+		sendCommand({
+			id: randomUUID(),
+			action: 'unsend',
+			chatGuid,
+			messageGuid
+		})
+	);
+
+	if (!response.success) {
+		throw new Error(response.error ?? 'Failed to unsend message');
+	}
+}
+
+export async function debugUnsend(
+	chatGuid: string,
+	messageGuid: string,
+	partIndex?: number
+): Promise<IMCoreResponse> {
+	return enqueue(() =>
+		sendCommand({
+			id: randomUUID(),
+			action: 'debug_unsend',
+			chatGuid,
+			messageGuid,
+			partIndex: partIndex ?? 0
+		})
+	);
+}
+
 export async function sendReply(
 	chatGuid: string,
 	messageGuid: string,
@@ -118,14 +154,53 @@ export async function sendReply(
 	}
 }
 
-export async function markAsRead(chatGuid: string): Promise<void> {
+export async function sendEdit(
+	chatGuid: string,
+	messageGuid: string,
+	text: string,
+	partIndex?: number
+): Promise<void> {
 	const response = await enqueue(() =>
 		sendCommand({
 			id: randomUUID(),
-			action: 'mark_read',
-			chatGuid
+			action: 'edit',
+			chatGuid,
+			messageGuid,
+			text,
+			partIndex: partIndex ?? 0
 		})
 	);
+
+	if (!response.success) {
+		throw new Error(response.error ?? 'Failed to edit message');
+	}
+}
+
+export async function markAsRead(chatGuid: string): Promise<void> {
+	const response = await enqueue(async () => {
+		try {
+			return await sendCommand(
+				{
+					id: randomUUID(),
+					action: 'mark_read',
+					chatGuid
+				},
+				MARK_READ_TIMEOUT
+			);
+		} catch (err) {
+			// Bridge can be briefly unavailable during restart/hot-reload.
+			// Retry once before failing.
+			await sleep(250);
+			return sendCommand(
+				{
+					id: randomUUID(),
+					action: 'mark_read',
+					chatGuid
+				},
+				MARK_READ_TIMEOUT
+			);
+		}
+	});
 
 	if (!response.success) {
 		throw new Error(response.error ?? 'Failed to mark as read');

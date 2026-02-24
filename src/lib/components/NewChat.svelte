@@ -8,6 +8,125 @@
 	let message = $state('');
 	let sending = $state(false);
 	let error = $state('');
+	let contactsLoading = $state(false);
+	let contactsLoaded = $state(false);
+	let contacts: Array<{ name: string; phones: string[]; emails: string[] }> = $state([]);
+	let recipientInput: HTMLInputElement | undefined = $state();
+
+	type ContactSuggestion = {
+		name: string;
+		primaryIdentifier: string;
+		allIdentifiers: string[];
+		score: number;
+	};
+
+	async function ensureContactsLoaded() {
+		if (contactsLoaded || contactsLoading) return;
+		contactsLoading = true;
+		try {
+			const res = await fetch('/api/contacts');
+			if (!res.ok) return;
+			const data = await res.json();
+			if (Array.isArray(data.contacts)) {
+				contacts = data.contacts;
+				contactsLoaded = true;
+			}
+		} catch {
+			// Silent failure; send still works using backend name resolution.
+		} finally {
+			contactsLoading = false;
+		}
+	}
+
+	$effect(() => {
+		if (!open) return;
+		ensureContactsLoaded();
+	});
+
+	const suggestions = $derived.by(() => {
+		const q = recipient.trim().toLowerCase();
+		if (!q || !contacts.length) return [] as ContactSuggestion[];
+
+		const all: ContactSuggestion[] = [];
+		for (const contact of contacts) {
+			const name = contact.name?.trim();
+			if (!name) continue;
+			const lowerName = name.toLowerCase();
+
+			let nameScore = 0;
+			if (lowerName === q) nameScore = 5;
+			else if (lowerName.startsWith(q)) nameScore = 4;
+			else if (lowerName.includes(q)) nameScore = 3;
+
+			const identifiers = [...contact.phones, ...contact.emails]
+				.map((v) => v.trim())
+				.filter((v) => !!v);
+			if (identifiers.length === 0) continue;
+
+			let identifierScore = 0;
+			for (const identifier of identifiers) {
+				const id = identifier.trim();
+				const lowerId = id.toLowerCase();
+				if (lowerId === q) identifierScore = Math.max(identifierScore, 5);
+				else if (lowerId.startsWith(q)) identifierScore = Math.max(identifierScore, 3);
+				else if (lowerId.includes(q)) identifierScore = Math.max(identifierScore, 2);
+			}
+
+			const score = Math.max(nameScore, identifierScore);
+			if (score > 0) {
+				all.push({ name, primaryIdentifier: identifiers[0], allIdentifiers: identifiers, score });
+			}
+		}
+
+		all.sort((a, b) => b.score - a.score || a.name.localeCompare(b.name));
+		const unique: ContactSuggestion[] = [];
+		const seen = new Set<string>();
+		for (const item of all) {
+			const key = item.name.toLowerCase();
+			if (seen.has(key)) continue;
+			seen.add(key);
+			unique.push(item);
+			if (unique.length >= 8) break;
+		}
+		return unique;
+	});
+
+	async function focusExistingChat(identifier: string): Promise<boolean> {
+		try {
+			const res = await fetch('/api/messages', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({
+					handle: identifier,
+					text: ''
+				})
+			});
+			if (!res.ok) return false;
+
+			const data = await res.json();
+			if (typeof data.chatId !== 'number') return false;
+
+			open = false;
+			recipient = '';
+			message = '';
+			error = '';
+			await refreshChatList();
+			pushState(`/chat/${data.chatId}`, { chatId: data.chatId });
+			return true;
+		} catch {
+			return false;
+		}
+	}
+
+	async function chooseSuggestion(suggestion: ContactSuggestion) {
+		recipient = suggestion.primaryIdentifier;
+		error = '';
+
+		const focused = await focusExistingChat(suggestion.primaryIdentifier);
+		if (focused) return;
+
+		queueMicrotask(() => recipientInput?.focus());
+	}
 
 	async function handleSend() {
 		if (!recipient.trim()) return;
@@ -67,11 +186,32 @@
 
 			<div class="space-y-3">
 				<input
+					bind:this={recipientInput}
 					type="text"
 					placeholder="Name, phone number, or email"
 					bind:value={recipient}
 					class="w-full rounded-lg bg-gray-100 px-4 py-2 text-sm outline-none placeholder:text-gray-400 focus:ring-2 focus:ring-blue-300"
 				/>
+				{#if recipient.trim().length > 0 && suggestions.length > 0}
+					<div class="-mt-1 max-h-52 overflow-y-auto rounded-lg border border-gray-200 bg-white shadow-sm">
+						{#each suggestions as suggestion (suggestion.name)}
+							<button
+								type="button"
+								onclick={() => chooseSuggestion(suggestion)}
+								class="flex w-full items-center justify-between gap-3 px-3 py-2 text-left hover:bg-gray-50"
+							>
+								<span class="truncate text-sm text-gray-900">{suggestion.name}</span>
+								<span class="shrink-0 text-xs text-gray-500">
+									{#if suggestion.allIdentifiers.length > 1}
+										{suggestion.allIdentifiers.length} identifiers
+									{:else}
+										{suggestion.primaryIdentifier}
+									{/if}
+								</span>
+							</button>
+						{/each}
+					</div>
+				{/if}
 				<textarea
 					placeholder="Message (optional when chat already exists)"
 					bind:value={message}

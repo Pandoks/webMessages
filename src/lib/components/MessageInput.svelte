@@ -7,16 +7,20 @@
 		disabled = false,
 		offline = false,
 		replyTo,
+		editTo,
 		focusToken = 0,
-		onCancelReply
+		onCancelReply,
+		onCancelEdit
 	}: {
 		onSend: (text: string) => void | Promise<void>;
 		onSendFile?: (file: File) => void | Promise<void>;
 		disabled?: boolean;
 		offline?: boolean;
 		replyTo?: Message;
+		editTo?: Message;
 		focusToken?: number;
 		onCancelReply?: () => void;
+		onCancelEdit?: () => void;
 	} = $props();
 
 	const isDisabled = $derived(disabled || offline);
@@ -25,6 +29,7 @@
 	let textarea: HTMLTextAreaElement | undefined = $state();
 	let fileInput: HTMLInputElement | undefined = $state();
 	let pendingFile: File | null = $state(null);
+	let lastAppliedEditGuid: string | null = $state(null);
 
 	$effect(() => {
 		const token = focusToken;
@@ -37,10 +42,40 @@
 		});
 	});
 
+	$effect(() => {
+		const guid = editTo?.guid ?? null;
+		if (!guid) {
+			lastAppliedEditGuid = null;
+			return;
+		}
+		if (guid === lastAppliedEditGuid) return;
+		lastAppliedEditGuid = guid;
+		text = editTo?.body ?? editTo?.text ?? '';
+		if (pendingFile) clearPendingFile();
+		queueMicrotask(() => {
+			if (!textarea) return;
+			textarea.focus();
+			const len = textarea.value.length;
+			textarea.setSelectionRange(len, len);
+			textarea.style.height = 'auto';
+			textarea.style.height = Math.min(textarea.scrollHeight, 120) + 'px';
+		});
+	});
+
 	async function handleSubmit() {
 		if (isDisabled) return;
 
 		const trimmed = text.trim();
+		if (editTo) {
+			if (!trimmed) return;
+			await Promise.resolve(onSend(trimmed));
+			text = '';
+			if (textarea) {
+				textarea.style.height = 'auto';
+			}
+			return;
+		}
+
 		if (pendingFile && onSendFile) {
 			const file = pendingFile;
 			pendingFile = null;
@@ -122,6 +157,16 @@
 		</div>
 	{/if}
 
+	{#if editTo}
+		<div class="mb-2 flex items-center gap-2 rounded-lg border-l-2 border-amber-400 bg-amber-50 px-3 py-2 text-sm">
+			<div class="min-w-0 flex-1">
+				<p class="text-xs font-medium text-amber-700">Editing message</p>
+				<p class="truncate text-amber-900">{editTo.body ?? ''}</p>
+			</div>
+			<button onclick={() => onCancelEdit?.()} class="shrink-0 text-amber-500 hover:text-amber-700">&#x2715;</button>
+		</div>
+	{/if}
+
 	{#if pendingFile}
 		<div class="mb-2 flex items-center gap-2 rounded-lg bg-gray-100 px-3 py-2 text-sm">
 			{#if pendingFile.type.startsWith('image/')}
@@ -155,7 +200,7 @@
 		/>
 		<button
 			onclick={() => fileInput?.click()}
-			disabled={isDisabled}
+			disabled={isDisabled || !!editTo}
 			aria-label="Attach file"
 			class="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-gray-400 hover:bg-gray-100 hover:text-gray-600 disabled:opacity-50"
 		>
@@ -170,7 +215,7 @@
 			onkeydown={handleKeydown}
 			oninput={handleInput}
 			onpaste={handlePaste}
-			placeholder={offline ? "You're offline" : 'iMessage'}
+			placeholder={offline ? "You're offline" : (editTo ? 'Edit message' : 'iMessage')}
 			rows="1"
 			disabled={isDisabled}
 			class="flex-1 resize-none rounded-2xl bg-gray-100 px-4 py-2 text-sm outline-none placeholder:text-gray-400 focus:ring-2 focus:ring-blue-300 disabled:opacity-50"
@@ -178,7 +223,7 @@
 		<button
 			onclick={handleSubmit}
 			disabled={isDisabled || (!text.trim() && !pendingFile)}
-			aria-label="Send message"
+			aria-label={editTo ? 'Save edit' : 'Send message'}
 			class="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-blue-500 text-white transition-colors hover:bg-blue-600 disabled:bg-gray-300"
 		>
 			<svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">

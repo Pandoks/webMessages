@@ -148,6 +148,17 @@ export function getMaxMessageRowId(): number {
 }
 
 function rowToMessage(row: MessageRow, chatId: number): Message {
+	const body = getMessageText(row.text, row.attributedBody);
+	const syntheticRetracted =
+		row.date_retracted === 0 &&
+		row.date_edited > 0 &&
+		row.associated_message_type === 0 &&
+		row.is_from_me === 1 &&
+		row.service === 'iMessage' &&
+		body.trim().length === 0;
+	const effectiveDateRetracted = row.date_retracted || (syntheticRetracted ? row.date_edited : 0);
+	const effectiveDateEdited = syntheticRetracted ? 0 : row.date_edited;
+
 	return {
 		rowid: row.rowid,
 		guid: row.guid,
@@ -158,8 +169,8 @@ function rowToMessage(row: MessageRow, chatId: number): Message {
 		date: appleToUnixMs(row.date),
 		date_read: row.date_read ? appleToUnixMs(row.date_read) : null,
 		date_delivered: row.date_delivered ? appleToUnixMs(row.date_delivered) : null,
-		date_retracted: row.date_retracted ? appleToUnixMs(row.date_retracted) : null,
-		date_edited: row.date_edited ? appleToUnixMs(row.date_edited) : null,
+		date_retracted: effectiveDateRetracted ? appleToUnixMs(effectiveDateRetracted) : null,
+		date_edited: effectiveDateEdited ? appleToUnixMs(effectiveDateEdited) : null,
 		is_delivered: row.is_delivered === 1,
 		is_sent: row.is_sent === 1,
 		is_read: row.is_read === 1,
@@ -175,6 +186,6 @@ function rowToMessage(row: MessageRow, chatId: number): Message {
 		other_handle: row.other_handle,
 		chat_id: chatId,
 		sender: row.handle_identifier ?? undefined,
-		body: getMessageText(row.text, row.attributedBody)
+		body
 	};
 }
