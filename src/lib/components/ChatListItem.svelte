@@ -68,7 +68,7 @@
 			</span>
 		</div>
 		<div class="flex items-center gap-2">
-			<p class="truncate text-sm {hasUnread ? 'text-gray-700' : 'text-gray-500'}">
+			<p class="min-w-0 flex-1 truncate text-sm {hasUnread ? 'text-gray-700' : 'text-gray-500'}">
 				{preview}
 			</p>
 			{#if hasUnread}

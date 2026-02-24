@@ -70,6 +70,28 @@ export function updateChatLastMessage(chatId: number, message: Message) {
 	chats = [updated, ...without];
 }
 
+export function incrementChatUnread(chatId: number, delta = 1) {
+	if (delta <= 0) return;
+	const idx = chats.findIndex((c) => c.rowid === chatId);
+	if (idx === -1) return;
+
+	const chat = chats[idx];
+	const next = [...chats];
+	next[idx] = { ...chat, unread_count: (chat.unread_count ?? 0) + delta };
+	chats = next;
+}
+
+export function clearChatUnread(chatId: number) {
+	const idx = chats.findIndex((c) => c.rowid === chatId);
+	if (idx === -1) return;
+
+	const chat = chats[idx];
+	if ((chat.unread_count ?? 0) === 0) return;
+	const next = [...chats];
+	next[idx] = { ...chat, unread_count: 0 };
+	chats = next;
+}
+
 /** Replace all messages for a chat */
 export function setChatMessages(chatId: number, messages: Message[]) {
 	const next = new Map(messageMemoryCache);

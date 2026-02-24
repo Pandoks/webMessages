@@ -3,6 +3,8 @@ import {
 	setServerChats,
 	loadCachedChats,
 	updateChatLastMessage,
+	incrementChatUnread,
+	clearChatUnread,
 	setChatMessages,
 	appendMessage,
 	prependMessages,
@@ -70,6 +72,7 @@ export function initSync() {
 /** Load a chat's messages and participants. Called when chatId changes. */
 export async function loadChat(chatId: number) {
 	activeChatId = chatId;
+	clearChatUnread(chatId);
 	const chatStore = getChatStore();
 
 	// If messages are already loaded, skip to background refresh
@@ -194,6 +197,9 @@ function handleNewMessages(events: { chatId: number; message: Message }[]) {
 			appendMessage(chatId, message);
 			cacheMessages([message]);
 			updateChatLastMessage(chatId, message);
+			if (!message.is_from_me && activeChatId !== chatId) {
+				incrementChatUnread(chatId);
+			}
 		}
 	}
 
