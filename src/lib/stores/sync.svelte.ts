@@ -203,6 +203,9 @@ function handleNewMessages(events: { chatId: number; message: Message }[]) {
 	const hasUnknown = events.some((e) => !knownChatIds.has(e.chatId));
 	if (hasUnknown) {
 		refreshChatList();
+		if (activeChatId !== null) {
+			loadChat(activeChatId);
+		}
 	}
 }
 

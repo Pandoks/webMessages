@@ -152,6 +152,17 @@ function directChatsByHandleStmt() {
 	return _directChatsByHandleStmt;
 }
 
+function sameHandleIdentifier(a: string, b: string): boolean {
+	const left = a.trim();
+	const right = b.trim();
+	if (!left || !right) return false;
+	if (left.toLowerCase() === right.toLowerCase()) return true;
+	if (isPhoneNumber(left) && isPhoneNumber(right)) {
+		return normalizePhone(left) === normalizePhone(right);
+	}
+	return false;
+}
+
 export function getChatList(): Chat[] {
 	const rows = (chatListStmt() as ReturnType<ReturnType<typeof getDb>['prepare']>).all() as ChatRow[];
 	return rows.map(rowToChat);
@@ -213,6 +224,39 @@ export function findLatestDirectChatByHandleIdentifiers(
 	}
 
 	return latest;
+}
+
+export function findDirectChatsByHandleIdentifiers(
+	identifiers: string[]
+): Array<{ rowid: number; guid: string; handle_identifier: string }> {
+	const out: Array<{ rowid: number; guid: string; handle_identifier: string }> = [];
+	const seen = new Set<number>();
+
+	for (const identifier of identifiers) {
+		const needle = identifier.trim();
+		if (!needle) continue;
+
+		const candidates: string[] = [needle];
+		if (isPhoneNumber(needle)) {
+			const normalized = normalizePhone(needle);
+			if (!candidates.some((v) => v.toLowerCase() === normalized.toLowerCase())) {
+				candidates.push(normalized);
+			}
+		}
+
+		for (const candidate of candidates) {
+			const rows = directChatsByHandleStmt().all(candidate, candidate) as DirectChatRow[];
+			for (const row of rows) {
+				if (!sameHandleIdentifier(row.handle_identifier, candidate)) continue;
+				if (seen.has(row.rowid)) continue;
+				seen.add(row.rowid);
+				out.push({ rowid: row.rowid, guid: row.guid, handle_identifier: row.handle_identifier });
+			}
+		}
+	}
+
+	out.sort((a, b) => b.rowid - a.rowid);
+	return out;
 }
 
 function rowToChat(row: ChatRow): Chat {

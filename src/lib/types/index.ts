@@ -24,6 +24,7 @@ export interface Message {
 	item_type: number;
 	other_handle: number;
 	chat_id: number;
+	chat_guid?: string;
 	sender?: string; // resolved handle id
 	attachments?: Attachment[];
 	reactions?: Reaction[];

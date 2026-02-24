@@ -99,10 +99,11 @@
 
 	async function handleReact(message: Message, reactionType: number) {
 		if (!chat) return;
+		const targetChatGuid = message.chat_guid ?? chat.guid;
 		await fetch('/api/react', {
 			method: 'POST',
 			headers: { 'Content-Type': 'application/json' },
-			body: JSON.stringify({ chatGuid: chat.guid, messageGuid: message.guid, reactionType })
+			body: JSON.stringify({ chatGuid: targetChatGuid, messageGuid: message.guid, reactionType })
 		}).catch((err) => console.error('React error:', err));
 	}
 
@@ -147,11 +148,12 @@
 		try {
 			let res: Response;
 			if (isReply && replyGuid) {
+				const replyChatGuid = replyingTo?.chat_guid ?? chat.guid;
 				res = await fetch('/api/reply', {
 					method: 'POST',
 					headers: { 'Content-Type': 'application/json' },
 					body: JSON.stringify({
-						chatGuid: chat.guid,
+						chatGuid: replyChatGuid,
 						messageGuid: replyGuid,
 						text
 					})
@@ -180,13 +182,14 @@
 
 	async function handleInlineEditSubmit(message: Message, text: string) {
 		if (!chat) return;
+		const targetChatGuid = message.chat_guid ?? chat.guid;
 
 		try {
 			const res = await fetch('/api/edit', {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({
-					chatGuid: chat.guid,
+					chatGuid: targetChatGuid,
 					messageGuid: message.guid,
 					text
 				})
@@ -233,12 +236,13 @@
 			onCancelEdit={() => { editingMessage = null; }}
 			onUnsend={async (msg) => {
 				if (!chat) return;
+				const targetChatGuid = msg.chat_guid ?? chat.guid;
 				try {
 					const res = await fetch('/api/unsend', {
 						method: 'POST',
 						headers: { 'Content-Type': 'application/json' },
 						body: JSON.stringify({
-							chatGuid: chat.guid,
+							chatGuid: targetChatGuid,
 							messageGuid: msg.guid
 						})
 					});

@@ -30,6 +30,8 @@ interface MessageRow {
 	item_type: number;
 	other_handle: number;
 	handle_identifier: string | null;
+	chat_id?: number;
+	chat_guid?: string;
 }
 
 const MESSAGE_COLUMNS = `
@@ -70,9 +72,12 @@ let _maxRowIdStmt: ReturnType<ReturnType<typeof getDb>['prepare']> | null = null
 function messagesByChatStmt() {
 	if (!_messagesByChatStmt) {
 		_messagesByChatStmt = getDb().prepare(`
-			SELECT ${MESSAGE_COLUMNS}
+			SELECT ${MESSAGE_COLUMNS},
+				cmj.chat_id as chat_id,
+				c.guid as chat_guid
 			FROM message m
 			JOIN chat_message_join cmj ON m.ROWID = cmj.message_id
+			JOIN chat c ON c.ROWID = cmj.chat_id
 			LEFT JOIN handle h ON m.handle_id = h.ROWID
 			WHERE cmj.chat_id = ?
 				AND m.associated_message_type = 0
@@ -100,9 +105,11 @@ function newMessagesStmt() {
 	if (!_newMessagesStmt) {
 		_newMessagesStmt = getDb().prepare(`
 			SELECT ${MESSAGE_COLUMNS},
-				cmj.chat_id
+				cmj.chat_id,
+				c.guid as chat_guid
 			FROM message m
 			JOIN chat_message_join cmj ON m.ROWID = cmj.message_id
+			JOIN chat c ON c.ROWID = cmj.chat_id
 			LEFT JOIN handle h ON m.handle_id = h.ROWID
 			WHERE m.ROWID > ?
 			ORDER BY m.ROWID ASC
@@ -123,8 +130,37 @@ export function getMessagesByChat(
 	limit = 50,
 	offset = 0
 ): Message[] {
-	const rows = messagesByChatStmt().all(chatId, limit, offset) as MessageRow[];
-	return rows.map((row) => rowToMessage(row, chatId)).reverse();
+	return getMessagesByChats([chatId], limit, offset);
+}
+
+export function getMessagesByChats(chatIds: number[], limit = 50, offset = 0): Message[] {
+	if (chatIds.length === 0) return [];
+	if (chatIds.length === 1) {
+		const rows = messagesByChatStmt().all(chatIds[0], limit, offset) as MessageRow[];
+		return rows
+			.map((row) => rowToMessage(row, row.chat_id ?? chatIds[0], row.chat_guid ?? undefined))
+			.reverse();
+	}
+
+	const placeholders = chatIds.map(() => '?').join(',');
+	const stmt = getDb().prepare(`
+		SELECT ${MESSAGE_COLUMNS},
+			cmj.chat_id as chat_id,
+			c.guid as chat_guid
+		FROM message m
+		JOIN chat_message_join cmj ON m.ROWID = cmj.message_id
+		JOIN chat c ON c.ROWID = cmj.chat_id
+		LEFT JOIN handle h ON m.handle_id = h.ROWID
+		WHERE cmj.chat_id IN (${placeholders})
+			AND m.associated_message_type = 0
+			AND NOT (m.item_type != 0 AND m.group_action_type = 0 AND m.group_title IS NULL)
+		ORDER BY m.date DESC
+		LIMIT ? OFFSET ?
+	`);
+	const rows = stmt.all(...chatIds, limit, offset) as MessageRow[];
+	return rows
+		.map((row) => rowToMessage(row, row.chat_id ?? chatIds[0], row.chat_guid ?? undefined))
+		.reverse();
 }
 
 export function getMessageByGuid(guid: string): Message | null {
@@ -138,7 +174,7 @@ export function getNewMessages(sinceRowId: number): { chatId: number; message: M
 
 	return rows.map((row) => ({
 		chatId: row.chat_id,
-		message: rowToMessage(row, row.chat_id)
+		message: rowToMessage(row, row.chat_id, row.chat_guid ?? undefined)
 	}));
 }
 
@@ -147,7 +183,7 @@ export function getMaxMessageRowId(): number {
 	return row?.max_id ?? 0;
 }
 
-function rowToMessage(row: MessageRow, chatId: number): Message {
+function rowToMessage(row: MessageRow, chatId: number, chatGuid?: string): Message {
 	const body = getMessageText(row.text, row.attributedBody);
 	const syntheticRetracted =
 		row.date_retracted === 0 &&
@@ -185,6 +221,7 @@ function rowToMessage(row: MessageRow, chatId: number): Message {
 		item_type: row.item_type,
 		other_handle: row.other_handle,
 		chat_id: chatId,
+		chat_guid: chatGuid,
 		sender: row.handle_identifier ?? undefined,
 		body
 	};

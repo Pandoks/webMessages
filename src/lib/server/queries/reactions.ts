@@ -48,3 +48,37 @@ export function getReactionsByChat(chatId: number): Reaction[] {
 		is_from_me: row.is_from_me === 1
 	}));
 }
+
+export function getReactionsByChats(chatIds: number[]): Reaction[] {
+	if (chatIds.length === 0) return [];
+	if (chatIds.length === 1) return getReactionsByChat(chatIds[0]);
+
+	const placeholders = chatIds.map(() => '?').join(',');
+	const stmt = getDb().prepare(`
+		SELECT
+			m.ROWID as rowid,
+			m.associated_message_guid,
+			m.associated_message_type,
+			m.associated_message_emoji,
+			m.handle_id,
+			m.is_from_me,
+			h.id as handle_identifier
+		FROM message m
+		JOIN chat_message_join cmj ON m.ROWID = cmj.message_id
+		LEFT JOIN handle h ON m.handle_id = h.ROWID
+		WHERE cmj.chat_id IN (${placeholders})
+			AND m.associated_message_type >= 2000
+			AND m.associated_message_type <= 3006
+		ORDER BY m.ROWID ASC
+	`);
+	const rows = stmt.all(...chatIds) as ReactionRow[];
+	return rows.map((row) => ({
+		message_rowid: row.rowid,
+		associated_message_guid: row.associated_message_guid,
+		associated_message_type: row.associated_message_type,
+		handle_id: row.handle_id,
+		sender: row.handle_identifier ?? 'Me',
+		emoji: row.associated_message_emoji,
+		is_from_me: row.is_from_me === 1
+	}));
+}
