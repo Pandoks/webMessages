@@ -1,6 +1,7 @@
 <script lang="ts">
 	import type { Message } from '$lib/types/index.js';
 	import MessageBubble from './MessageBubble.svelte';
+	import MessageContextMenu from './MessageContextMenu.svelte';
 	import { isTimeSeparatorNeeded, formatTimeSeparator } from '$lib/utils/date.js';
 
 	let {
@@ -8,13 +9,17 @@
 		isGroup = false,
 		onLoadMore,
 		hasMore = false,
-		loading = false
+		loading = false,
+		onReact,
+		onReply
 	}: {
 		messages: Message[];
 		isGroup?: boolean;
 		onLoadMore?: () => void;
 		hasMore?: boolean;
 		loading?: boolean;
+		onReact?: (message: Message, reactionType: number) => void;
+		onReply?: (message: Message) => void;
 	} = $props();
 
 	let scrollContainer: HTMLDivElement | undefined = $state();
@@ -61,6 +66,54 @@
 		if (!prevMsg) return true;
 		return prevMsg.is_from_me || prevMsg.sender !== msg.sender;
 	}
+
+	// Compute delivery status labels (iMessage-style: "Read" at transition, status at end)
+	const statusMap = $derived.by(() => {
+		const map = new Map<number, string>();
+		if (!messages.length) return map;
+
+		// Find the trailing block of consecutive sent messages (no received messages after)
+		let trailingStart = messages.length;
+		for (let i = messages.length - 1; i >= 0; i--) {
+			if (!messages[i].is_from_me) break;
+			trailingStart = i;
+		}
+		if (trailingStart === messages.length) return map;
+
+		// Find the last read message in the trailing block
+		let lastReadIdx = -1;
+		for (let i = messages.length - 1; i >= trailingStart; i--) {
+			if (messages[i].is_read) {
+				lastReadIdx = i;
+				break;
+			}
+		}
+
+		// Show "Read" at the last read message if there are non-read messages after it
+		if (lastReadIdx !== -1 && lastReadIdx < messages.length - 1) {
+			map.set(lastReadIdx, 'Read');
+		}
+
+		// Show status on the very last message
+		const last = messages[messages.length - 1];
+		if (last.is_read) {
+			map.set(messages.length - 1, 'Read');
+		} else if (last.is_delivered) {
+			map.set(messages.length - 1, 'Delivered');
+		} else if (last.is_sent) {
+			map.set(messages.length - 1, 'Sent');
+		} else if (last.rowid < 0) {
+			map.set(messages.length - 1, 'Sending...');
+		}
+
+		return map;
+	});
+
+	let contextMenu: { message: Message; x: number; y: number } | null = $state(null);
+
+	function handleContextMenu(e: MouseEvent, msg: Message) {
+		contextMenu = { message: msg, x: e.clientX, y: e.clientY };
+	}
 </script>
 
 <div
@@ -89,6 +142,19 @@
 			{isGroup}
 			{replyTo}
 			{showSender}
+			statusText={statusMap.get(i)}
+			onContextMenu={handleContextMenu}
 		/>
 	{/each}
 </div>
+
+{#if contextMenu}
+	<MessageContextMenu
+		message={contextMenu.message}
+		x={contextMenu.x}
+		y={contextMenu.y}
+		onReact={(msg, type) => { onReact?.(msg, type); contextMenu = null; }}
+		onReply={(msg) => { onReply?.(msg); contextMenu = null; }}
+		onClose={() => { contextMenu = null; }}
+	/>
+{/if}

@@ -1,14 +1,22 @@
 <script lang="ts">
+	import type { Message } from '$lib/types/index.js';
+
 	let {
 		onSend,
 		onSendFile,
 		disabled = false,
-		offline = false
+		offline = false,
+		replyTo,
+		focusToken = 0,
+		onCancelReply
 	}: {
 		onSend: (text: string) => void;
 		onSendFile?: (file: File) => void;
 		disabled?: boolean;
 		offline?: boolean;
+		replyTo?: Message;
+		focusToken?: number;
+		onCancelReply?: () => void;
 	} = $props();
 
 	const isDisabled = $derived(disabled || offline);
@@ -17,6 +25,17 @@
 	let textarea: HTMLTextAreaElement | undefined = $state();
 	let fileInput: HTMLInputElement | undefined = $state();
 	let pendingFile: File | null = $state(null);
+
+	$effect(() => {
+		const token = focusToken;
+		if (!token) return;
+		queueMicrotask(() => {
+			if (!textarea) return;
+			textarea.focus();
+			const len = textarea.value.length;
+			textarea.setSelectionRange(len, len);
+		});
+	});
 
 	function handleSubmit() {
 		if (pendingFile && onSendFile) {
@@ -79,6 +98,16 @@
 </script>
 
 <div class="border-t border-gray-200 bg-white p-3">
+	{#if replyTo}
+		<div class="mb-2 flex items-center gap-2 rounded-lg bg-blue-50 px-3 py-2 text-sm border-l-2 border-blue-400">
+			<div class="min-w-0 flex-1">
+				<p class="text-xs font-medium text-blue-600">{replyTo.sender ?? 'Unknown'}</p>
+				<p class="truncate text-gray-600">{replyTo.body ?? ''}</p>
+			</div>
+			<button onclick={() => onCancelReply?.()} class="shrink-0 text-gray-400 hover:text-gray-600">&#x2715;</button>
+		</div>
+	{/if}
+
 	{#if pendingFile}
 		<div class="mb-2 flex items-center gap-2 rounded-lg bg-gray-100 px-3 py-2 text-sm">
 			{#if pendingFile.type.startsWith('image/')}

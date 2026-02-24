@@ -9,12 +9,16 @@
 		message,
 		isGroup = false,
 		replyTo,
-		showSender = false
+		showSender = false,
+		statusText,
+		onContextMenu
 	}: {
 		message: Message;
 		isGroup?: boolean;
 		replyTo?: Message;
 		showSender?: boolean;
+		statusText?: string;
+		onContextMenu?: (e: MouseEvent, message: Message) => void;
 	} = $props();
 
 	const isSent = $derived(message.is_from_me);
@@ -38,7 +42,11 @@
 		{displayText}
 	</div>
 {:else}
-	<div class="flex {isSent ? 'justify-end' : 'justify-start'} group">
+	<!-- svelte-ignore a11y_no_static_element_interactions -->
+	<div
+		class="flex {isSent ? 'justify-end' : 'justify-start'} group"
+		oncontextmenu={(e) => { if (onContextMenu) { e.preventDefault(); onContextMenu(e, message); } }}
+	>
 		<div class="min-w-0 max-w-[75%]">
 			{#if showSender && !isSent && isGroup}
 				<p class="mb-0.5 px-3 text-xs font-medium text-gray-500">
@@ -90,6 +98,10 @@
 				<div class="{isSent ? 'flex justify-end' : ''}">
 					<ReactionBadge reactions={message.reactions} />
 				</div>
+			{/if}
+
+			{#if statusText}
+				<p class="mt-0.5 text-right text-[10px] text-gray-400">{statusText}</p>
 			{/if}
 		</div>
 	</div>

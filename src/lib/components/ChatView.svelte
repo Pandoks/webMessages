@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { untrack } from 'svelte';
 	import Header from '$lib/components/Header.svelte';
 	import MessageThread from '$lib/components/MessageThread.svelte';
 	import MessageInput from '$lib/components/MessageInput.svelte';
@@ -20,6 +21,9 @@
 	let sending = $state(false);
 	let loadingOlder = $state(false);
 	let hasMore = $state(true);
+	let replyingTo: Message | null = $state(null);
+	let replyFocusToken = $state(0);
+	let lastLoadedChatId: number | null = $state(null);
 
 	const chat = $derived(chatStore.chats.find((c) => c.rowid === chatId) ?? null);
 	const allMessages = $derived(chatStore.getMessages(chatId));
@@ -27,10 +31,30 @@
 
 	// Load chat data when chatId changes
 	$effect(() => {
+		if (chatId === lastLoadedChatId) return;
+		lastLoadedChatId = chatId;
+
 		const id = chatId;
 		hasMore = true;
 		loadingOlder = false;
-		loadChat(id);
+		replyingTo = null;
+		// Prevent loadChat internals from becoming effect dependencies.
+		untrack(() => {
+			loadChat(id);
+		});
+	});
+
+	// Mark chat as read when opened
+	let lastMarkedChatGuid: string | null = null;
+	$effect(() => {
+		if (chat?.guid && chat.guid !== lastMarkedChatGuid) {
+			lastMarkedChatGuid = chat.guid;
+			fetch('/api/mark-read', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ chatGuid: chat.guid })
+			}).catch(() => {});
+		}
 	});
 
 	async function loadMore() {
@@ -70,9 +94,20 @@
 		}
 	}
 
+	async function handleReact(message: Message, reactionType: number) {
+		if (!chat) return;
+		await fetch('/api/react', {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({ chatGuid: chat.guid, messageGuid: message.guid, reactionType })
+		}).catch((err) => console.error('React error:', err));
+	}
+
 	async function handleSend(text: string) {
 		if (!chat) return;
 		sending = true;
+		const isReply = !!replyingTo;
+		const replyGuid = replyingTo?.guid ?? null;
 		const optimistic: Message = {
 			rowid: -Date.now(),
 			guid: `temp-${Date.now()}`,
@@ -92,7 +127,7 @@
 			associated_message_type: 0,
 			associated_message_guid: null,
 			associated_message_emoji: null,
-			thread_originator_guid: null,
+			thread_originator_guid: replyGuid,
 			thread_originator_part: null,
 			group_title: null,
 			group_action_type: 0,
@@ -102,17 +137,31 @@
 			sender: 'Me',
 			body: text
 		};
+		replyingTo = null;
 		addOptimisticMessage(chatId, optimistic);
 
 		try {
-			const res = await fetch('/api/messages', {
-				method: 'POST',
-				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({
-					chatGuid: chat.guid,
-					text
-				})
-			});
+			let res: Response;
+			if (isReply && replyGuid) {
+				res = await fetch('/api/reply', {
+					method: 'POST',
+					headers: { 'Content-Type': 'application/json' },
+					body: JSON.stringify({
+						chatGuid: chat.guid,
+						messageGuid: replyGuid,
+						text
+					})
+				});
+			} else {
+				res = await fetch('/api/messages', {
+					method: 'POST',
+					headers: { 'Content-Type': 'application/json' },
+					body: JSON.stringify({
+						chatGuid: chat.guid,
+						text
+					})
+				});
+			}
 			if (!res.ok) {
 				console.error('Failed to send message');
 				removeOptimisticMessage(chatId, optimistic.guid);
@@ -135,12 +184,20 @@
 			onLoadMore={loadMore}
 			{hasMore}
 			loading={loadingOlder}
+			onReact={handleReact}
+			onReply={(msg) => {
+				replyingTo = msg;
+				replyFocusToken += 1;
+			}}
 		/>
 		<MessageInput
 			onSend={handleSend}
 			onSendFile={handleSendFile}
 			disabled={sending}
 			offline={!connection.connected}
+			replyTo={replyingTo ?? undefined}
+			focusToken={replyFocusToken}
+			onCancelReply={() => { replyingTo = null; }}
 		/>
 	</div>
 {/if}

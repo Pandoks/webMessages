@@ -62,6 +62,7 @@
 	<div
 		class="fixed inset-0 z-50 flex items-start justify-center bg-black/50 pt-20"
 		role="dialog"
+		tabindex="-1"
 		aria-modal="true"
 		aria-label="Search messages"
 		onkeydown={handleKeydown}
