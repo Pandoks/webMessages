@@ -29,13 +29,17 @@
 	$effect(() => {
 		const token = focusToken;
 		if (!token) return;
+		focusComposer();
+	});
+
+	function focusComposer() {
 		queueMicrotask(() => {
 			if (!textarea) return;
 			textarea.focus();
 			const len = textarea.value.length;
 			textarea.setSelectionRange(len, len);
 		});
-	});
+	}
 
 	async function handleSubmit() {
 		if (isDisabled) return;
@@ -58,6 +62,7 @@
 			if (textarea) {
 				textarea.style.height = 'auto';
 			}
+			focusComposer();
 			return;
 		}
 
@@ -67,6 +72,7 @@
 		if (textarea) {
 			textarea.style.height = 'auto';
 		}
+		focusComposer();
 	}
 
 	function handleKeydown(e: KeyboardEvent) {
@@ -106,11 +112,24 @@
 		}
 	}
 
+	function handleGlobalKeydown(e: KeyboardEvent) {
+		if (e.key !== 'Tab') return;
+		if (e.metaKey || e.ctrlKey || e.altKey) return;
+		if (!textarea) return;
+		// Respect modal/tab navigation when a modal dialog is open.
+		if (document.querySelector('[data-modal-focus-scope="true"]')) return;
+
+		e.preventDefault();
+		focusComposer();
+	}
+
 	function clearPendingFile() {
 		pendingFile = null;
 		if (fileInput) fileInput.value = '';
 	}
 </script>
+
+<svelte:window onkeydown={handleGlobalKeydown} />
 
 <div class="border-t border-gray-200 bg-white p-3">
 	{#if replyTo}

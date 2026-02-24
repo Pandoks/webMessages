@@ -12,6 +12,16 @@
 	let contactsLoaded = $state(false);
 	let contacts: Array<{ name: string; phones: string[]; emails: string[] }> = $state([]);
 	let recipientInput: HTMLInputElement | undefined = $state();
+	let modalPanel: HTMLDivElement | undefined = $state();
+
+	const FOCUSABLE_SELECTOR = [
+		'a[href]',
+		'button:not([disabled])',
+		'input:not([disabled])',
+		'textarea:not([disabled])',
+		'select:not([disabled])',
+		'[tabindex]:not([tabindex="-1"])'
+	].join(',');
 
 	type ContactSuggestion = {
 		name: string;
@@ -41,6 +51,13 @@
 	$effect(() => {
 		if (!open) return;
 		ensureContactsLoaded();
+	});
+
+	$effect(() => {
+		if (!open) return;
+		queueMicrotask(() => {
+			recipientInput?.focus();
+		});
 	});
 
 	const suggestions = $derived.by(() => {
@@ -169,19 +186,74 @@
 			open = false;
 		}
 	}
+
+	function closeModal() {
+		open = false;
+	}
+
+	function handleBackdropClick(e: MouseEvent) {
+		if (e.target !== e.currentTarget) return;
+		closeModal();
+	}
+
+	function getFocusableElements(): HTMLElement[] {
+		if (!modalPanel) return [];
+		return Array.from(modalPanel.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR)).filter((el) => {
+			if (el.hasAttribute('disabled')) return false;
+			if (el.getAttribute('aria-hidden') === 'true') return false;
+			return el.offsetParent !== null || el === document.activeElement;
+		});
+	}
+
+	function trapTabWithinModal(e: KeyboardEvent) {
+		if (!open || e.key !== 'Tab') return;
+
+		const focusable = getFocusableElements();
+		if (focusable.length === 0) {
+			e.preventDefault();
+			modalPanel?.focus();
+			return;
+		}
+
+		const first = focusable[0];
+		const last = focusable[focusable.length - 1];
+		const active = document.activeElement as HTMLElement | null;
+		const focusInModal = !!active && modalPanel?.contains(active);
+
+		if (e.shiftKey) {
+			if (!focusInModal || active === first) {
+				e.preventDefault();
+				last.focus();
+			}
+			return;
+		}
+
+		if (!focusInModal || active === last) {
+			e.preventDefault();
+			first.focus();
+		}
+	}
 </script>
+
+<svelte:window onkeydown={trapTabWithinModal} />
 
 {#if open}
 	<!-- svelte-ignore a11y_no_noninteractive_element_interactions a11y_interactive_supports_focus -->
 	<div
+		data-modal-focus-scope="true"
 		class="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
 		role="dialog"
 		tabindex="-1"
 		aria-modal="true"
 		aria-label="New conversation"
 		onkeydown={handleKeydown}
+		onclick={handleBackdropClick}
 	>
-		<div class="mx-4 w-full max-w-md rounded-2xl bg-white p-6 shadow-xl">
+		<div
+			bind:this={modalPanel}
+			tabindex="-1"
+			class="mx-4 w-full max-w-md rounded-2xl bg-white p-6 shadow-xl"
+		>
 			<h2 class="mb-4 text-lg font-semibold">New Conversation</h2>
 
 			<div class="space-y-3">
@@ -225,7 +297,7 @@
 
 				<div class="flex justify-end gap-2">
 					<button
-						onclick={() => { open = false; }}
+						onclick={closeModal}
 						class="rounded-lg px-4 py-2 text-sm text-gray-600 hover:bg-gray-100"
 					>
 						Cancel
