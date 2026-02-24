@@ -13,7 +13,10 @@
 		onReact,
 		onReply,
 		onEdit,
-		onUnsend
+		onUnsend,
+		editingMessage = null,
+		onSubmitEdit,
+		onCancelEdit
 	}: {
 		messages: Message[];
 		isGroup?: boolean;
@@ -24,11 +27,18 @@
 		onReply?: (message: Message) => void;
 		onEdit?: (message: Message) => void;
 		onUnsend?: (message: Message) => void;
+		editingMessage?: Message | null;
+		onSubmitEdit?: (message: Message, text: string) => void | Promise<void>;
+		onCancelEdit?: () => void;
 	} = $props();
 
 	let scrollContainer: HTMLDivElement | undefined = $state();
 	let wasAtBottom = true;
 	let loadInFlight = false;
+	let editDraft = $state('');
+	let editSaving = $state(false);
+	let inlineEditTextarea: HTMLTextAreaElement | undefined = $state();
+	let appliedEditGuid: string | null = $state(null);
 
 	// Build a map of guid → message for reply lookups
 	const messageMap = $derived.by(() => {
@@ -79,6 +89,64 @@
 		if (!isGroup || msg.is_from_me) return false;
 		if (!prevMsg) return true;
 		return prevMsg.is_from_me || prevMsg.sender !== msg.sender;
+	}
+
+	$effect(() => {
+		const guid = editingMessage?.guid ?? null;
+		if (!guid) {
+			appliedEditGuid = null;
+			editDraft = '';
+			editSaving = false;
+			return;
+		}
+		if (guid === appliedEditGuid) return;
+		appliedEditGuid = guid;
+		editDraft = editingMessage?.body ?? editingMessage?.text ?? '';
+		editSaving = false;
+
+		queueMicrotask(() => {
+			if (!inlineEditTextarea) return;
+			inlineEditTextarea.focus();
+			const len = inlineEditTextarea.value.length;
+			inlineEditTextarea.setSelectionRange(len, len);
+			inlineEditTextarea.style.height = 'auto';
+			inlineEditTextarea.style.height = Math.min(inlineEditTextarea.scrollHeight, 160) + 'px';
+		});
+	});
+
+	function handleInlineEditInput() {
+		if (!inlineEditTextarea) return;
+		inlineEditTextarea.style.height = 'auto';
+		inlineEditTextarea.style.height = Math.min(inlineEditTextarea.scrollHeight, 160) + 'px';
+	}
+
+	async function saveInlineEdit(msg: Message) {
+		const text = editDraft.trim();
+		if (!text || !onSubmitEdit || editSaving) return;
+		editSaving = true;
+		try {
+			await onSubmitEdit(msg, text);
+		} finally {
+			editSaving = false;
+		}
+	}
+
+	function cancelInlineEdit() {
+		editDraft = '';
+		editSaving = false;
+		onCancelEdit?.();
+	}
+
+	function handleInlineEditKeydown(e: KeyboardEvent, msg: Message) {
+		if (e.key === 'Escape') {
+			e.preventDefault();
+			cancelInlineEdit();
+			return;
+		}
+		if (e.key === 'Enter' && !e.shiftKey) {
+			e.preventDefault();
+			void saveInlineEdit(msg);
+		}
 	}
 
 	function isUnsent(msg: Message): boolean {
@@ -160,14 +228,46 @@
 			</div>
 		{/if}
 
-		<MessageBubble
-			message={msg}
-			{isGroup}
-			{replyTo}
-			{showSender}
-			statusText={statusMap.get(i)}
-			onContextMenu={handleContextMenu}
-		/>
+		{#if editingMessage && editingMessage.guid === msg.guid}
+			<div class="flex justify-end group">
+				<div class="min-w-0 max-w-[75%]">
+					<div class="rounded-2xl border border-blue-200 bg-blue-50 p-2">
+						<textarea
+							bind:this={inlineEditTextarea}
+							bind:value={editDraft}
+							oninput={handleInlineEditInput}
+							onkeydown={(e) => handleInlineEditKeydown(e, msg)}
+							rows="1"
+							class="w-full resize-none rounded-xl bg-white px-3 py-2 text-sm text-gray-900 outline-none ring-1 ring-blue-100 focus:ring-2 focus:ring-blue-300"
+						></textarea>
+						<div class="mt-2 flex items-center justify-end gap-2">
+							<button
+								onclick={cancelInlineEdit}
+								class="rounded-lg px-3 py-1.5 text-xs text-gray-600 hover:bg-white"
+							>
+								Cancel
+							</button>
+							<button
+								onclick={() => saveInlineEdit(msg)}
+								disabled={editSaving || !editDraft.trim().length}
+								class="rounded-lg bg-blue-500 px-3 py-1.5 text-xs text-white hover:bg-blue-600 disabled:cursor-not-allowed disabled:bg-blue-300"
+							>
+								{editSaving ? 'Saving...' : 'Save'}
+							</button>
+						</div>
+					</div>
+				</div>
+			</div>
+		{:else}
+			<MessageBubble
+				message={msg}
+				{isGroup}
+				{replyTo}
+				{showSender}
+				statusText={statusMap.get(i)}
+				onContextMenu={handleContextMenu}
+			/>
+		{/if}
 	{/each}
 </div>
 

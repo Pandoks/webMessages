@@ -109,32 +109,6 @@
 	async function handleSend(text: string) {
 		if (!chat) return;
 		sending = true;
-		const editTarget = editingMessage;
-		const editGuid = editTarget?.guid ?? null;
-		if (editTarget && editGuid) {
-			try {
-				const res = await fetch('/api/edit', {
-					method: 'POST',
-					headers: { 'Content-Type': 'application/json' },
-					body: JSON.stringify({
-						chatGuid: chat.guid,
-						messageGuid: editGuid,
-						text
-					})
-				});
-				if (!res.ok) {
-					console.error('Failed to edit message');
-					return;
-				}
-				applyLocalMessageEdit(chatId, editGuid, text);
-				editingMessage = null;
-			} catch (err) {
-				console.error('Edit error:', err);
-			} finally {
-				sending = false;
-			}
-			return;
-		}
 
 		const isReply = !!replyingTo;
 		const replyGuid = replyingTo?.guid ?? null;
@@ -203,6 +177,36 @@
 			sending = false;
 		}
 	}
+
+	async function handleInlineEditSubmit(message: Message, text: string) {
+		if (!chat) return;
+
+		try {
+			const res = await fetch('/api/edit', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({
+					chatGuid: chat.guid,
+					messageGuid: message.guid,
+					text
+				})
+			});
+			if (!res.ok) {
+				const payload = await res.json().catch(() => ({}));
+				console.error('Failed to edit message:', payload.error ?? res.statusText);
+				return;
+			}
+
+			applyLocalMessageEdit(chatId, message.guid, text);
+			editingMessage = null;
+
+			setTimeout(() => {
+				loadChat(chatId);
+			}, 1000);
+		} catch (err) {
+			console.error('Edit error:', err);
+		}
+	}
 </script>
 
 {#if chat}
@@ -223,8 +227,10 @@
 			onEdit={(msg) => {
 				replyingTo = null;
 				editingMessage = msg;
-				composerFocusToken += 1;
 			}}
+			{editingMessage}
+			onSubmitEdit={handleInlineEditSubmit}
+			onCancelEdit={() => { editingMessage = null; }}
 			onUnsend={async (msg) => {
 				if (!chat) return;
 				try {
@@ -257,10 +263,8 @@
 			disabled={sending}
 			offline={!connection.connected}
 			replyTo={replyingTo ?? undefined}
-			editTo={editingMessage ?? undefined}
 			focusToken={composerFocusToken}
 			onCancelReply={() => { replyingTo = null; }}
-			onCancelEdit={() => { editingMessage = null; }}
 		/>
 	</div>
 {/if}

@@ -45,6 +45,15 @@
 	);
 	const copyLabel = $derived(hasImageAttachment ? 'Copy Image' : 'Copy Text');
 	const undoSendWindowMs = 2 * 60 * 1000;
+	const editWindowMs = 15 * 60 * 1000;
+	const canEdit = $derived(
+		message.is_from_me &&
+			!message.date_retracted &&
+			message.service === 'iMessage' &&
+			(message.body ?? '').trim().length > 0 &&
+			(!message.attachments || message.attachments.length === 0) &&
+			Date.now() - message.date <= editWindowMs
+	);
 	const canUnsend = $derived(
 		message.is_from_me &&
 			!message.date_retracted &&
@@ -247,12 +256,15 @@
 			{#if message.is_from_me && !message.date_retracted && (message.body ?? '').trim().length > 0 && (!message.attachments || message.attachments.length === 0)}
 				<button
 					onclick={handleEdit}
+					disabled={!canEdit}
 					class="flex w-full items-center gap-3 px-4 py-2.5 text-left text-sm text-gray-700 hover:bg-gray-50"
+					class:opacity-50={!canEdit}
+					class:cursor-not-allowed={!canEdit}
 				>
 					<svg class="h-5 w-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 						<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16.862 4.487a2.1 2.1 0 113 2.97L9 18.319 5 19l.682-4 11.18-10.513z" />
 					</svg>
-					Edit
+					{canEdit ? 'Edit' : 'Edit (expired)'}
 				</button>
 			{/if}
 			{#if message.is_from_me && !message.date_retracted}

@@ -524,102 +524,117 @@ static NSString *tryUnsendWithChatAndItem(id chat, id messageItem, id messageObj
             messageObj ? NSStringFromClass([messageObj class]) : @"nil", msgSummary];
 }
 
-static NSString *tryEditWithChatAndItem(id chat, id messageItem, NSString *messageGuid, NSString *text) {
-    if (!chat || !messageGuid.length || !text.length) return @"Invalid chat, message GUID, or text";
+static NSString *tryEditWithChatAndItem(id chat, id messageObj, id messageItem, NSUInteger partIndex, NSString *text) {
+    if (!chat || !text.length) return @"Invalid chat or text";
+    if (!messageItem && !messageObj) return @"Message lookup failed";
 
-    NSAttributedString *attributedText = [[NSAttributedString alloc] initWithString:text];
+    if (!messageItem && messageObj) {
+        messageItem = callObjc0(messageObj, @"_imMessageItem");
+        if (!messageItem) messageItem = callObjc0(messageObj, @"imMessageItem");
+    }
+    if (!messageObj && messageItem) {
+        messageObj = callObjc0(messageItem, @"message");
+    }
 
-    // Try chat methods that accept message item + text.
-    NSArray<NSString *> *itemTextSelectors = @[
-        @"editMessageItem:toText:",
-        @"editMessageItem:text:",
-        @"editMessage:toText:",
-        @"editMessage:text:",
-        @"editChatItem:toText:",
-        @"replaceMessageItem:withText:",
-        @"updateMessageItem:text:"
-    ];
+    NSMutableAttributedString *edited = [[NSMutableAttributedString alloc] initWithString:text];
+    NSMutableAttributedString *backCompat = [[NSMutableAttributedString alloc] initWithString:text];
 
-    for (NSString *selName in itemTextSelectors) {
-        if (!messageItem) continue;
-        SEL sel = NSSelectorFromString(selName);
-        if (![chat respondsToSelector:sel]) continue;
+    // Preferred modern API (macOS 14+/iOS 17 style).
+    SEL editItemSel5 = NSSelectorFromString(@"editMessageItem:atPartIndex:withNewPartText:newPartTranslation:backwardCompatabilityText:");
+    if ([chat respondsToSelector:editItemSel5] && messageItem) {
         @try {
-            ((void (*)(id, SEL, id, id))objc_msgSend)(chat, sel, messageItem, text);
+            ((void (*)(id, SEL, id, NSInteger, id, id, id))objc_msgSend)(
+                chat,
+                editItemSel5,
+                messageItem,
+                (NSInteger)partIndex,
+                edited,
+                nil,
+                backCompat
+            );
+            NSLog(@"[imcore-bridge] edit invoked selector=editMessageItem:atPartIndex:withNewPartText:newPartTranslation:backwardCompatabilityText: itemClass=%@ part=%lu",
+                  NSStringFromClass([messageItem class]),
+                  (unsigned long)partIndex);
             return nil;
         } @catch (NSException *e) {
-            return [NSString stringWithFormat:@"Selector %@ threw %@ - %@",
-                    selName, e.name, e.reason];
+            return [NSString stringWithFormat:@"Selector editMessageItem:atPartIndex:withNewPartText:newPartTranslation:backwardCompatabilityText: threw %@ - %@",
+                    e.name, e.reason];
         }
     }
 
-    // Try chat methods that accept message GUID + text.
-    NSArray<NSString *> *guidTextSelectors = @[
-        @"editMessageWithGUID:text:",
-        @"editMessageGUID:text:",
-        @"editMessageID:text:",
-        @"updateMessageWithGUID:text:"
-    ];
-    for (NSString *selName in guidTextSelectors) {
-        SEL sel = NSSelectorFromString(selName);
-        if (![chat respondsToSelector:sel]) continue;
+    // Older/alternate chat-level edit APIs.
+    SEL editItemSel4 = NSSelectorFromString(@"editMessageItem:atPartIndex:withNewPartText:backwardCompatabilityText:");
+    if ([chat respondsToSelector:editItemSel4] && messageItem) {
         @try {
-            ((void (*)(id, SEL, id, id))objc_msgSend)(chat, sel, messageGuid, text);
+            ((void (*)(id, SEL, id, NSInteger, id, id))objc_msgSend)(
+                chat,
+                editItemSel4,
+                messageItem,
+                (NSInteger)partIndex,
+                edited,
+                backCompat
+            );
+            NSLog(@"[imcore-bridge] edit invoked selector=editMessageItem:atPartIndex:withNewPartText:backwardCompatabilityText: itemClass=%@ part=%lu",
+                  NSStringFromClass([messageItem class]),
+                  (unsigned long)partIndex);
             return nil;
         } @catch (NSException *e) {
-            return [NSString stringWithFormat:@"Selector %@ threw %@ - %@",
-                    selName, e.name, e.reason];
+            return [NSString stringWithFormat:@"Selector editMessageItem:atPartIndex:withNewPartText:backwardCompatabilityText: threw %@ - %@",
+                    e.name, e.reason];
         }
     }
 
-    // Try message item level edit methods.
-    if (messageItem) {
-        for (NSString *selName in @[@"editWithText:", @"editText:", @"updateWithText:", @"setEditedText:"]) {
-            SEL sel = NSSelectorFromString(selName);
-            if (![messageItem respondsToSelector:sel]) continue;
-            @try {
-                ((void (*)(id, SEL, id))objc_msgSend)(messageItem, sel, text);
-                return nil;
-            } @catch (NSException *e) {
-                return [NSString stringWithFormat:@"Message item selector %@ threw %@ - %@",
-                        selName, e.name, e.reason];
-            }
+    SEL editMessageSel = NSSelectorFromString(@"editMessage:atPartIndex:withNewPartText:backwardCompatabilityText:");
+    if ([chat respondsToSelector:editMessageSel] && messageObj) {
+        @try {
+            ((void (*)(id, SEL, id, NSInteger, id, id))objc_msgSend)(
+                chat,
+                editMessageSel,
+                messageObj,
+                (NSInteger)partIndex,
+                edited,
+                backCompat
+            );
+            NSLog(@"[imcore-bridge] edit invoked selector=editMessage:atPartIndex:withNewPartText:backwardCompatabilityText: msgClass=%@ part=%lu",
+                  NSStringFromClass([messageObj class]),
+                  (unsigned long)partIndex);
+            return nil;
+        } @catch (NSException *e) {
+            return [NSString stringWithFormat:@"Selector editMessage:atPartIndex:withNewPartText:backwardCompatabilityText: threw %@ - %@",
+                    e.name, e.reason];
         }
     }
 
-    // Fallback: synthesize edit-associated IMMessage event.
-    @try {
-        Class IMMessageCls = NSClassFromString(@"IMMessage");
-        if (!IMMessageCls) return @"IMMessage class not found";
-        NSString *guid = [[NSUUID UUID] UUIDString];
-        NSString *associatedGuid = [NSString stringWithFormat:@"p:0/%@", messageGuid];
-
-        SEL initSel = NSSelectorFromString(@"initWithSender:time:text:messageSubject:fileTransferGUIDs:flags:error:guid:subject:associatedMessageGUID:associatedMessageType:associatedMessageRange:messageSummaryInfo:");
-        id msg = [IMMessageCls alloc];
-        id (*initIMP)(id, SEL, id, id, id, id, id, unsigned long long, id, id, id, id, long long, NSRange, id);
-        initIMP = (id (*)(id, SEL, id, id, id, id, id, unsigned long long, id, id, id, id, long long, NSRange, id))objc_msgSend;
-
-        msg = initIMP(msg, initSel,
-            nil,                                                       // sender
-            [NSDate date],                                             // time
-            attributedText,                                            // text
-            nil,                                                       // messageSubject
-            @[],                                                       // fileTransferGUIDs
-            (unsigned long long)100005,                                // flags
-            nil,                                                       // error
-            guid,                                                      // guid
-            nil,                                                       // subject
-            associatedGuid,                                            // associatedMessageGUID
-            (long long)1000,                                           // associatedMessageType (edit)
-            NSMakeRange(0, 0),                                         // associatedMessageRange
-            nil);                                                      // messageSummaryInfo
-
-        ((void (*)(id, SEL, id))objc_msgSend)(chat, NSSelectorFromString(@"sendMessage:"), msg);
-        return nil;
-    } @catch (NSException *e) {
-        return [NSString stringWithFormat:@"Fallback edit send exception: %@ - %@",
-                e.name, e.reason];
+    SEL resendEditedSel = NSSelectorFromString(@"resendEditedMessageItem:forPartIndex:withBackwardCompatabilityText:");
+    if ([chat respondsToSelector:resendEditedSel] && messageItem) {
+        @try {
+            ((void (*)(id, SEL, id, NSInteger, id))objc_msgSend)(
+                chat,
+                resendEditedSel,
+                messageItem,
+                (NSInteger)partIndex,
+                backCompat
+            );
+            NSLog(@"[imcore-bridge] edit invoked selector=resendEditedMessageItem:forPartIndex:withBackwardCompatabilityText: itemClass=%@ part=%lu",
+                  NSStringFromClass([messageItem class]),
+                  (unsigned long)partIndex);
+            return nil;
+        } @catch (NSException *e) {
+            return [NSString stringWithFormat:@"Selector resendEditedMessageItem:forPartIndex:withBackwardCompatabilityText: threw %@ - %@",
+                    e.name, e.reason];
+        }
     }
+
+    NSString *chatSummary = selectorSummary(chat, @[@"edit", @"resend"]);
+    NSString *itemSummary = selectorSummary(messageItem, @[@"edit"]);
+    NSString *msgSummary = selectorSummary(messageObj, @[@"edit"]);
+    return [NSString stringWithFormat:@"No supported edit selector found. chat[%@]=%@ item[%@]=%@ msg[%@]=%@",
+            NSStringFromClass([chat class]),
+            chatSummary,
+            messageItem ? NSStringFromClass([messageItem class]) : @"nil",
+            itemSummary,
+            messageObj ? NSStringFromClass([messageObj class]) : @"nil",
+            msgSummary];
 }
 
 static void bootstrapDaemonConnection(void) {
@@ -1376,6 +1391,7 @@ static void processCommand(NSDictionary *command) {
         } else if ([action isEqualToString:@"edit"]) {
             NSString *messageGuid = command[@"messageGuid"];
             NSString *text = command[@"text"];
+            NSNumber *partIndex = command[@"partIndex"] ?: @0;
 
             if (!messageGuid.length || !text.length) {
                 response[@"success"] = @NO;
@@ -1384,22 +1400,44 @@ static void processCommand(NSDictionary *command) {
                 return;
             }
 
-            dispatch_semaphore_t sem = dispatch_semaphore_create(0);
+            dispatch_semaphore_t sem;
+            __block id messageObj = nil;
             __block id messageItem = nil;
             __block BOOL didLookup = NO;
 
             Class IMChatHistoryControllerCls = NSClassFromString(@"IMChatHistoryController");
             if (IMChatHistoryControllerCls) {
                 id histCtrl = ((id (*)(id, SEL))objc_msgSend)(IMChatHistoryControllerCls, NSSelectorFromString(@"sharedInstance"));
+                SEL loadMessageSel = NSSelectorFromString(@"loadMessageWithGUID:completionBlock:");
                 SEL loadMessageItemSel = NSSelectorFromString(@"loadMessageItemWithGUID:completionBlock:");
-                if (histCtrl && [histCtrl respondsToSelector:loadMessageItemSel]) {
+
+                if (histCtrl && [histCtrl respondsToSelector:loadMessageSel]) {
                     didLookup = YES;
+                    sem = dispatch_semaphore_create(0);
+                    runOnMainSync(^{
+                        ((void (*)(id, SEL, id, id))objc_msgSend)(histCtrl,
+                            loadMessageSel,
+                            messageGuid,
+                            ^(id message) {
+                                messageObj = message;
+                                messageItem = callObjc0(message, @"_imMessageItem");
+                                if (!messageItem) messageItem = callObjc0(message, @"imMessageItem");
+                                dispatch_semaphore_signal(sem);
+                            });
+                    });
+                    (void)dispatch_semaphore_wait(sem, dispatch_time(DISPATCH_TIME_NOW, 8 * NSEC_PER_SEC));
+                }
+
+                if (!messageItem && histCtrl && [histCtrl respondsToSelector:loadMessageItemSel]) {
+                    didLookup = YES;
+                    sem = dispatch_semaphore_create(0);
                     runOnMainSync(^{
                         ((void (*)(id, SEL, id, id))objc_msgSend)(histCtrl,
                             loadMessageItemSel,
                             messageGuid,
                             ^(id item) {
                                 messageItem = item;
+                                if (!messageObj) messageObj = callObjc0(item, @"message");
                                 dispatch_semaphore_signal(sem);
                             });
                     });
@@ -1410,7 +1448,7 @@ static void processCommand(NSDictionary *command) {
             __block NSString *editSendError = nil;
 
             runOnMainSync(^{
-                editSendError = tryEditWithChatAndItem(chat, messageItem, messageGuid, text);
+                editSendError = tryEditWithChatAndItem(chat, messageObj, messageItem, [partIndex unsignedIntegerValue], text);
             });
 
             if (editSendError.length) {
