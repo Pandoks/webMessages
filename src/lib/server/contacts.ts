@@ -23,15 +23,18 @@ let lastRefreshStartedAt = 0;
 const CONTACT_REFRESH_INTERVAL_MS = 30 * 60 * 1000; // 30 minutes
 const MIN_RETRY_INTERVAL_MS = 60 * 1000; // 1 minute
 
-const PHOTO_CACHE_DIR = join(process.env.HOME ?? '', '.cache/webMessages/contact-photos');
+const HOME_DIR = process.env.HOME ?? '';
+const PHOTO_CACHE_ROOT = join(HOME_DIR, '.cache/webMessages');
+const PHOTO_CACHE_DIR = join(PHOTO_CACHE_ROOT, 'contact-photos');
+const PHOTO_EXPORTER_BIN_DIR = join(PHOTO_CACHE_ROOT, 'bin');
 const NICKNAME_CACHE_DIR = join(
-	process.env.HOME ?? '',
+	HOME_DIR,
 	'Library/Messages/NickNameCache'
 );
 
-// Path to the compiled Swift photo exporter (in project root/scripts/)
-const PHOTO_EXPORTER = join(process.cwd(), 'scripts/export-photos');
-const PHOTO_EXPORTER_SOURCE = join(process.cwd(), 'scripts/export-photos.swift');
+// Photo exporter source lives in native/, binary is cached outside the repo.
+const PHOTO_EXPORTER_SOURCE = join(process.cwd(), 'native/export-photos.swift');
+const PHOTO_EXPORTER = join(PHOTO_EXPORTER_BIN_DIR, 'export-photos');
 
 const APPLESCRIPT = `
 tell application "Contacts"
@@ -99,6 +102,7 @@ async function broadcastContactsReady(): Promise<void> {
 
 function ensurePhotoExporterBuilt(): boolean {
 	if (!existsSync(PHOTO_EXPORTER_SOURCE)) return false;
+	mkdirSync(PHOTO_EXPORTER_BIN_DIR, { recursive: true });
 
 	let needsBuild = !existsSync(PHOTO_EXPORTER);
 	if (!needsBuild) {

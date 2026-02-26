@@ -164,14 +164,16 @@ export function removeMatchingOptimisticMessage(chatId: number, message: Message
 
 	const normalizedBody = (message.body ?? message.text ?? '').trim();
 	if (!normalizedBody) return;
+	const matchingWindowMs = message.schedule_type === 2 ? 10 * 60 * 1000 : 120_000;
 
 	// Find nearest optimistic sent message with same text in a short window.
 	const idx = existing.findIndex((m) => {
 		if (!m.is_from_me) return false;
 		if (m.rowid >= 0) return false;
+		if (m.schedule_type !== message.schedule_type) return false;
 		const optimisticBody = (m.body ?? m.text ?? '').trim();
 		if (optimisticBody !== normalizedBody) return false;
-		return Math.abs(m.date - message.date) < 120_000;
+		return Math.abs(m.date - message.date) < matchingWindowMs;
 	});
 	if (idx === -1) return;
 

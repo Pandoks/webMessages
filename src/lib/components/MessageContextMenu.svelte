@@ -46,19 +46,31 @@
 	const copyLabel = $derived(hasImageAttachment ? 'Copy Image' : 'Copy Text');
 	const undoSendWindowMs = 2 * 60 * 1000;
 	const editWindowMs = 15 * 60 * 1000;
+	const isScheduledPending = $derived(
+		message.schedule_type === 2 &&
+			!message.date_retracted &&
+			message.date > Date.now()
+	);
 	const canEdit = $derived(
 		message.is_from_me &&
 			!message.date_retracted &&
 			message.service === 'iMessage' &&
 			(message.body ?? '').trim().length > 0 &&
 			(!message.attachments || message.attachments.length === 0) &&
-			Date.now() - message.date <= editWindowMs
+			(isScheduledPending || Date.now() - message.date <= editWindowMs)
 	);
 	const canUnsend = $derived(
 		message.is_from_me &&
 			!message.date_retracted &&
 			message.service === 'iMessage' &&
-			Date.now() - message.date <= undoSendWindowMs
+			(isScheduledPending || Date.now() - message.date <= undoSendWindowMs)
+	);
+	const unsendLabel = $derived(
+		isScheduledPending
+			? 'Cancel Scheduled Message'
+			: canUnsend
+				? 'Undo Send'
+				: 'Undo Send (expired)'
 	);
 
 	function handleReact(type: number) {
@@ -278,7 +290,7 @@
 					<svg class="h-5 w-5 text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 						<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 7h12M9 7V5h6v2m-7 3v7m4-7v7m4-7v7M5 7h14l-1 12H6L5 7z" />
 					</svg>
-					{canUnsend ? 'Undo Send' : 'Undo Send (expired)'}
+					{unsendLabel}
 				</button>
 			{/if}
 			<button

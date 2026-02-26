@@ -10,6 +10,8 @@ export interface Message {
 	date_delivered: number | null;
 	date_retracted: number | null;
 	date_edited: number | null;
+	schedule_type: number;
+	schedule_state: number;
 	is_delivered: boolean;
 	is_sent: boolean;
 	is_read: boolean;

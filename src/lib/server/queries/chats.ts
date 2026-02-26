@@ -21,6 +21,8 @@ interface ChatRow {
 	last_message_is_from_me: number;
 	last_message_service: string | null;
 	last_message_associated_message_type: number;
+	last_message_schedule_type: number;
+	last_message_schedule_state: number;
 }
 
 interface HandleRow {
@@ -75,7 +77,9 @@ function chatListStmt() {
 				m.date as last_message_date,
 				m.is_from_me as last_message_is_from_me,
 				m.service as last_message_service,
-				m.associated_message_type as last_message_associated_message_type
+				m.associated_message_type as last_message_associated_message_type,
+				COALESCE(m.schedule_type, 0) as last_message_schedule_type,
+				COALESCE(m.schedule_state, 0) as last_message_schedule_state
 			FROM chat c
 			INNER JOIN chat_message_join cmj ON cmj.chat_id = c.ROWID
 			INNER JOIN message m ON m.ROWID = cmj.message_id
@@ -129,7 +133,9 @@ function chatByIdStmt() {
 				m.date as last_message_date,
 				m.is_from_me as last_message_is_from_me,
 				m.service as last_message_service,
-				m.associated_message_type as last_message_associated_message_type
+				m.associated_message_type as last_message_associated_message_type,
+				COALESCE(m.schedule_type, 0) as last_message_schedule_type,
+				COALESCE(m.schedule_state, 0) as last_message_schedule_state
 			FROM chat c
 			LEFT JOIN chat_message_join cmj ON cmj.chat_id = c.ROWID
 			LEFT JOIN message m ON m.ROWID = cmj.message_id
@@ -310,6 +316,8 @@ function rowToChat(row: ChatRow): Chat {
 						date_delivered: null,
 						date_retracted: null,
 						date_edited: null,
+						schedule_type: row.last_message_schedule_type,
+						schedule_state: row.last_message_schedule_state,
 						is_delivered: false,
 						is_sent: false,
 						is_read: false,

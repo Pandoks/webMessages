@@ -116,12 +116,18 @@
 		}).catch((err) => console.error('React error:', err));
 	}
 
-	async function handleSend(text: string) {
+	async function handleSend(text: string, options: { scheduledForMs?: number } = {}) {
 		if (!chat) return;
 		sending = true;
 
 		const isReply = !!replyingTo;
 		const replyGuid = replyingTo?.guid ?? null;
+		const replyChatGuid = replyingTo?.chat_guid ?? chat.guid;
+		const scheduledForMs = options.scheduledForMs;
+		const isScheduled =
+			typeof scheduledForMs === 'number' &&
+			Number.isFinite(scheduledForMs) &&
+			scheduledForMs > Date.now();
 		const optimistic: Message = {
 			rowid: -Date.now(),
 			guid: `temp-${Date.now()}`,
@@ -129,13 +135,15 @@
 			handle_id: 0,
 			service: chat.service_name,
 			is_from_me: true,
-			date: Date.now(),
+			date: isScheduled ? scheduledForMs : Date.now(),
 			date_read: null,
 			date_delivered: null,
 			date_retracted: null,
 			date_edited: null,
-			is_delivered: false,
-			is_sent: false,
+			schedule_type: isScheduled ? 2 : 0,
+			schedule_state: isScheduled ? 2 : 0,
+			is_delivered: isScheduled,
+			is_sent: isScheduled,
 			is_read: false,
 			cache_has_attachments: false,
 			associated_message_type: 0,
@@ -157,7 +165,6 @@
 		try {
 			let res: Response;
 			if (isReply && replyGuid) {
-				const replyChatGuid = replyingTo?.chat_guid ?? chat.guid;
 				res = await fetch('/api/reply', {
 					method: 'POST',
 					headers: { 'Content-Type': 'application/json' },
@@ -173,13 +180,18 @@
 					headers: { 'Content-Type': 'application/json' },
 					body: JSON.stringify({
 						chatGuid: chat.guid,
-						text
+						text,
+						scheduledFor: isScheduled ? scheduledForMs : undefined
 					})
 				});
 			}
 			if (!res.ok) {
 				console.error('Failed to send message');
 				removeOptimisticMessage(chatId, optimistic.guid);
+			} else if (isScheduled) {
+				setTimeout(() => {
+					loadChat(chatId);
+				}, 1200);
 			}
 		} catch (err) {
 			console.error('Send error:', err);
@@ -189,9 +201,24 @@
 		}
 	}
 
-	async function handleInlineEditSubmit(message: Message, text: string) {
+	async function handleInlineEditSubmit(
+		message: Message,
+		text: string,
+		options?: { scheduledForMs?: number }
+	) {
 		if (!chat) return;
 		const targetChatGuid = message.chat_guid ?? chat.guid;
+		const beforeBody = (message.body ?? message.text ?? '').trim();
+		const trimmed = text.trim();
+		const hasTextEdit = trimmed.length > 0 && trimmed !== beforeBody;
+		const hasScheduleEdit =
+			typeof options?.scheduledForMs === 'number' &&
+			Number.isFinite(options.scheduledForMs) &&
+			Math.abs(options.scheduledForMs - message.date) > 1000;
+		if (!hasTextEdit && !hasScheduleEdit) {
+			editingMessage = null;
+			return;
+		}
 
 		try {
 			const res = await fetch('/api/edit', {
@@ -200,7 +227,8 @@
 				body: JSON.stringify({
 					chatGuid: targetChatGuid,
 					messageGuid: message.guid,
-					text
+					text: hasTextEdit ? trimmed : undefined,
+					scheduledFor: hasScheduleEdit ? options?.scheduledForMs : undefined
 				})
 			});
 			if (!res.ok) {
@@ -209,12 +237,14 @@
 				return;
 			}
 
-			applyLocalMessageEdit(chatId, message.guid, text);
+			if (hasTextEdit) {
+				applyLocalMessageEdit(chatId, message.guid, trimmed);
+			}
 			editingMessage = null;
 
 			setTimeout(() => {
 				loadChat(chatId);
-			}, 1000);
+			}, hasScheduleEdit ? 450 : 1000);
 		} catch (err) {
 			console.error('Edit error:', err);
 		}
@@ -246,6 +276,7 @@
 			onUnsend={async (msg) => {
 				if (!chat) return;
 				const targetChatGuid = msg.chat_guid ?? chat.guid;
+				const isScheduledPending = msg.schedule_type === 2 && msg.date > Date.now();
 				try {
 					const res = await fetch('/api/unsend', {
 						method: 'POST',
@@ -260,11 +291,19 @@
 						console.error('Failed to unsend message:', payload.error ?? res.statusText);
 						return;
 					}
-					// Do not optimistic-unsend locally; wait for DB/SSE truth.
-					// Force refresh shortly after bridge reports success.
-					setTimeout(() => {
-						loadChat(chatId);
-					}, 1200);
+					if (isScheduledPending) {
+						// Scheduled-cancel updates often arrive as row updates (no new ROWID),
+						// so hide locally immediately and then reconcile.
+						removeOptimisticMessage(chatId, msg.guid);
+						setTimeout(() => {
+							loadChat(chatId);
+						}, 500);
+					} else {
+						// Do not optimistic-unsend regular sent messages; wait for DB/SSE truth.
+						setTimeout(() => {
+							loadChat(chatId);
+						}, 1200);
+					}
 				} catch (err) {
 					console.error('Unsend error:', err);
 				}
@@ -272,6 +311,7 @@
 		/>
 		<MessageInput
 			onSend={handleSend}
+			onSendScheduled={(text, scheduledForMs) => handleSend(text, { scheduledForMs })}
 			onSendFile={handleSendFile}
 			disabled={sending}
 			offline={!connection.connected}

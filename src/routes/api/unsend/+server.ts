@@ -5,11 +5,34 @@ import { errorMessage, pollUntil, trimmedString } from '$lib/server/route-utils.
 
 const VERIFY_TIMEOUT_MS = 7000;
 const POLL_INTERVAL_MS = 250;
+const SCHEDULE_STATE_PENDING = 2;
+
+function isScheduledPendingMessage(message: {
+	date: number;
+	date_retracted: number | null;
+	schedule_type: number;
+	schedule_state: number;
+}): boolean {
+	if (message.date_retracted && message.date_retracted > 0) return false;
+	if (message.schedule_type !== 2) return false;
+	if (message.date <= Date.now()) return false;
+	// Some rows can briefly report 0 during transition; treat as pending.
+	return message.schedule_state === 0 || message.schedule_state === SCHEDULE_STATE_PENDING;
+}
 
 async function waitForRetraction(messageGuid: string): Promise<boolean> {
 	return pollUntil(() => {
 		const message = getMessageByGuid(messageGuid);
 		return !!(message?.date_retracted && message.date_retracted > 0);
+	}, VERIFY_TIMEOUT_MS, POLL_INTERVAL_MS);
+}
+
+async function waitForScheduledCancel(messageGuid: string): Promise<boolean> {
+	return pollUntil(() => {
+		const message = getMessageByGuid(messageGuid);
+		if (!message) return true;
+		if (message.date_retracted && message.date_retracted > 0) return true;
+		return !isScheduledPendingMessage(message);
 	}, VERIFY_TIMEOUT_MS, POLL_INTERVAL_MS);
 }
 
@@ -52,28 +75,39 @@ export const POST: RequestHandler = async ({ request }) => {
 		}
 		const ageMs = Date.now() - target.date;
 		const ageSec = Math.max(0, Math.floor(ageMs / 1000));
+		const scheduledPending = isScheduledPendingMessage(target);
 		console.log(
-			`[unsend] target service=${target.service} ageSec=${ageSec} is_from_me=${target.is_from_me} retracted=${target.date_retracted ? 1 : 0}`
+			`[unsend] target service=${target.service} ageSec=${ageSec} is_from_me=${target.is_from_me} retracted=${target.date_retracted ? 1 : 0} scheduled_pending=${
+				scheduledPending ? 1 : 0
+			}`
 		);
 		await sendUnsend(chatGuid, messageGuid);
 
-		// Verify unsend actually materialized in the DB (can no-op on unsupported messages).
-		const verified = await waitForRetraction(messageGuid);
+		// Scheduled cancellation often changes/removes the row without setting date_retracted.
+		const verified = scheduledPending
+			? await waitForScheduledCancel(messageGuid)
+			: await waitForRetraction(messageGuid);
 
 		if (!verified) {
 			await logDebugUnsend(chatGuid, messageGuid);
-			console.warn(`[unsend] no retraction observed for ${messageGuid}`);
+			console.warn(
+				`[unsend] no ${scheduledPending ? 'scheduled cancel' : 'retraction'} observed for ${messageGuid}`
+			);
 			return json(
 				{
 					success: false,
-					error: 'Undo Send was accepted by bridge but no retraction appeared. This message may be outside Apple\'s unsend window or unsupported for this chat.'
+					error: scheduledPending
+						? 'Cancel Send Later was accepted by bridge but no cancel state appeared. This message may no longer be cancelable on this device state.'
+						: 'Undo Send was accepted by bridge but no retraction appeared. This message may be outside Apple\'s unsend window or unsupported for this chat.'
 				},
 				{ status: 409 }
 			);
 		}
 
-		console.log(`[unsend] verified retraction for ${messageGuid}`);
-		return json({ success: true });
+		console.log(
+			`[unsend] verified ${scheduledPending ? 'scheduled cancel' : 'retraction'} for ${messageGuid}`
+		);
+		return json({ success: true, canceledScheduled: scheduledPending });
 	} catch (err) {
 		const message = errorMessage(err, 'Failed to unsend message');
 		const noEffect =

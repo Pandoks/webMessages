@@ -18,6 +18,12 @@
 		}
 		return participants.map((p) => p.display_name).join(', ');
 	});
+	const avatarIdentifier = $derived.by(() => {
+		if (isGroup) return undefined;
+		const participantId = participants[0]?.handle_identifier?.trim();
+		if (participantId) return participantId;
+		return chat.chat_identifier;
+	});
 
 	const phoneNumber = $derived.by(() => {
 		const fromParticipant = participants.find((p) => isPhoneNumber(p.handle_identifier));
@@ -67,7 +73,7 @@
 
 	<ContactAvatar
 		name={chat.display_name ?? '?'}
-		identifier={!isGroup ? chat.chat_identifier : undefined}
+		identifier={avatarIdentifier}
 		size={36}
 	/>
 

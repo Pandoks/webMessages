@@ -16,9 +16,15 @@
 
 	const preview = $derived.by(() => {
 		if (!chat.last_message) return '';
-		const body = chat.last_message.body ?? '';
-		const prefix = chat.last_message.is_from_me ? 'You: ' : '';
-		const text = prefix + body;
+		const body = (chat.last_message.body ?? '').trim();
+		const isScheduled =
+			chat.last_message.schedule_type === 2 && chat.last_message.date > Date.now();
+		const prefix = isScheduled
+			? 'Scheduled: '
+			: chat.last_message.is_from_me
+				? 'You: '
+				: '';
+		const text = prefix + (body || (isScheduled ? 'Message' : ''));
 		return text.length > 60 ? text.slice(0, 60) + '...' : text;
 	});
 
@@ -27,6 +33,12 @@
 	);
 	const unreadCount = $derived(chat.unread_count ?? 0);
 	const hasUnread = $derived(unreadCount > 0);
+	const avatarIdentifier = $derived.by(() => {
+		if (chat.style === 43) return undefined;
+		const participantId = chat.participants?.[0]?.handle_identifier?.trim();
+		if (participantId) return participantId;
+		return chat.chat_identifier;
+	});
 
 	function handleClick(e: MouseEvent) {
 		e.preventDefault();
@@ -42,7 +54,7 @@
 >
 	<ContactAvatar
 		name={chat.display_name ?? '?'}
-		identifier={chat.style !== 43 ? chat.chat_identifier : undefined}
+		identifier={avatarIdentifier}
 		size={48}
 	/>
 

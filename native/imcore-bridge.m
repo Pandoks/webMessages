@@ -17,6 +17,8 @@ static dispatch_source_t gPollTimer = NULL;
 static NSString *kListenerID = @"com.apple.MobileSMS";
 static const unsigned int kListenerCapabilities = 2162567; // Barcelona defaults (status/chats/send/history/etc.)
 static const int kHistoryLookupTimeoutSeconds = 8;
+static const unsigned long long kScheduledMessageTypeSendLater = 2;
+static const unsigned long long kScheduledMessageStatePending = 2;
 
 static void runOnMainSync(dispatch_block_t block);
 
@@ -1243,6 +1245,158 @@ static void processCommand(NSDictionary *command) {
             }
             response[@"success"] = @YES;
 
+        } else if ([action isEqualToString:@"send_scheduled"]) {
+            NSString *text = command[@"text"];
+            NSNumber *scheduledForMs = command[@"scheduledForMs"];
+
+            if (!text.length || ![scheduledForMs isKindOfClass:[NSNumber class]]) {
+                response[@"success"] = @NO;
+                response[@"error"] = @"text and scheduledForMs are required";
+                writeResponse(response);
+                return;
+            }
+
+            NSTimeInterval scheduledEpochSeconds = [scheduledForMs doubleValue] / 1000.0;
+            NSDate *deliveryDate = [NSDate dateWithTimeIntervalSince1970:scheduledEpochSeconds];
+            if (!deliveryDate || [deliveryDate timeIntervalSinceNow] < 30.0) {
+                response[@"success"] = @NO;
+                response[@"error"] = @"scheduledForMs must be at least 30 seconds in the future";
+                writeResponse(response);
+                return;
+            }
+
+            __block BOOL sendScheduledOK = NO;
+            __block NSString *sendScheduledError = nil;
+            runOnMainSync(^{
+                @try {
+                    SEL supportsSendLaterSel = NSSelectorFromString(@"_supportsSendLater");
+                    if ([chat respondsToSelector:supportsSendLaterSel]) {
+                        BOOL supportsSendLater = ((BOOL (*)(id, SEL))objc_msgSend)(chat, supportsSendLaterSel);
+                        if (!supportsSendLater) {
+                            sendScheduledError = @"Chat does not support Send Later";
+                            return;
+                        }
+                    }
+
+                    Class IMMessageCls = NSClassFromString(@"IMMessage");
+                    if (!IMMessageCls) {
+                        sendScheduledError = @"IMMessage class not available";
+                        return;
+                    }
+
+                    NSString *guid = [[NSUUID UUID] UUIDString];
+                    NSAttributedString *attributedText = [[NSAttributedString alloc] initWithString:text];
+                    id msg = [IMMessageCls alloc];
+
+                    SEL initScheduledWithSummary = NSSelectorFromString(@"initWithSender:time:text:messageSubject:fileTransferGUIDs:flags:error:guid:subject:balloonBundleID:payloadData:expressiveSendStyleID:threadIdentifier:scheduleType:scheduleState:messageSummaryInfo:");
+                    SEL initScheduled = NSSelectorFromString(@"initWithSender:time:text:messageSubject:fileTransferGUIDs:flags:error:guid:subject:balloonBundleID:payloadData:expressiveSendStyleID:threadIdentifier:scheduleType:scheduleState:");
+                    SEL initThread = NSSelectorFromString(@"initWithSender:time:text:messageSubject:fileTransferGUIDs:flags:error:guid:subject:threadIdentifier:");
+
+                    if ([msg respondsToSelector:initScheduledWithSummary]) {
+                        id (*initIMP)(id, SEL, id, id, id, id, id, unsigned long long, id, id, id, id, id, id, id, unsigned long long, unsigned long long, id);
+                        initIMP = (id (*)(id, SEL, id, id, id, id, id, unsigned long long, id, id, id, id, id, id, id, unsigned long long, unsigned long long, id))objc_msgSend;
+
+                        msg = initIMP(msg, initScheduledWithSummary,
+                            nil,                                                            // sender
+                            deliveryDate,                                                   // time (scheduled delivery)
+                            attributedText,                                                 // text
+                            nil,                                                            // messageSubject
+                            @[],                                                            // fileTransferGUIDs
+                            (unsigned long long)100005,                                     // flags
+                            nil,                                                            // error
+                            guid,                                                           // guid
+                            nil,                                                            // subject
+                            nil,                                                            // balloonBundleID
+                            nil,                                                            // payloadData
+                            nil,                                                            // expressiveSendStyleID
+                            nil,                                                            // threadIdentifier
+                            kScheduledMessageTypeSendLater,                                 // scheduleType
+                            kScheduledMessageStatePending,                                  // scheduleState
+                            nil);                                                           // messageSummaryInfo
+                    } else if ([msg respondsToSelector:initScheduled]) {
+                        id (*initIMP)(id, SEL, id, id, id, id, id, unsigned long long, id, id, id, id, id, id, id, unsigned long long, unsigned long long);
+                        initIMP = (id (*)(id, SEL, id, id, id, id, id, unsigned long long, id, id, id, id, id, id, id, unsigned long long, unsigned long long))objc_msgSend;
+
+                        msg = initIMP(msg, initScheduled,
+                            nil,                                                            // sender
+                            deliveryDate,                                                   // time (scheduled delivery)
+                            attributedText,                                                 // text
+                            nil,                                                            // messageSubject
+                            @[],                                                            // fileTransferGUIDs
+                            (unsigned long long)100005,                                     // flags
+                            nil,                                                            // error
+                            guid,                                                           // guid
+                            nil,                                                            // subject
+                            nil,                                                            // balloonBundleID
+                            nil,                                                            // payloadData
+                            nil,                                                            // expressiveSendStyleID
+                            nil,                                                            // threadIdentifier
+                            kScheduledMessageTypeSendLater,                                 // scheduleType
+                            kScheduledMessageStatePending);                                 // scheduleState
+                    } else if ([msg respondsToSelector:initThread]) {
+                        id (*initIMP)(id, SEL, id, id, id, id, id, unsigned long long, id, id, id, id);
+                        initIMP = (id (*)(id, SEL, id, id, id, id, id, unsigned long long, id, id, id, id))objc_msgSend;
+
+                        msg = initIMP(msg, initThread,
+                            nil,                                                            // sender
+                            deliveryDate,                                                   // time (scheduled delivery)
+                            attributedText,                                                 // text
+                            nil,                                                            // messageSubject
+                            @[],                                                            // fileTransferGUIDs
+                            (unsigned long long)100005,                                     // flags
+                            nil,                                                            // error
+                            guid,                                                           // guid
+                            nil,                                                            // subject
+                            nil);                                                           // threadIdentifier
+                    } else {
+                        sendScheduledError = @"No compatible IMMessage initializer found for scheduled sends";
+                        return;
+                    }
+
+                    if (!msg) {
+                        sendScheduledError = @"Failed to create scheduled message object";
+                        return;
+                    }
+
+                    SEL setScheduleTypeSel = NSSelectorFromString(@"setScheduleType:");
+                    if ([msg respondsToSelector:setScheduleTypeSel]) {
+                        ((void (*)(id, SEL, unsigned long long))objc_msgSend)(
+                            msg,
+                            setScheduleTypeSel,
+                            kScheduledMessageTypeSendLater
+                        );
+                    }
+
+                    SEL setScheduleStateSel = NSSelectorFromString(@"setScheduleState:");
+                    if ([msg respondsToSelector:setScheduleStateSel]) {
+                        ((void (*)(id, SEL, unsigned long long))objc_msgSend)(
+                            msg,
+                            setScheduleStateSel,
+                            kScheduledMessageStatePending
+                        );
+                    }
+
+                    ((void (*)(id, SEL, id))objc_msgSend)(chat, NSSelectorFromString(@"sendMessage:"), msg);
+                    sendScheduledOK = YES;
+                } @catch (NSException *e) {
+                    sendScheduledError = [NSString stringWithFormat:@"Scheduled send exception: %@ - %@", e.name, e.reason];
+                }
+            });
+
+            if (sendScheduledError.length) {
+                response[@"success"] = @NO;
+                response[@"error"] = sendScheduledError;
+                writeResponse(response);
+                return;
+            }
+            if (!sendScheduledOK) {
+                response[@"success"] = @NO;
+                response[@"error"] = @"Failed to send scheduled message on main thread";
+                writeResponse(response);
+                return;
+            }
+            response[@"success"] = @YES;
+
         } else if ([action isEqualToString:@"reply"]) {
             NSString *messageGuid = command[@"messageGuid"];
             NSString *text = command[@"text"];
@@ -1498,8 +1652,8 @@ static void processCommand(NSDictionary *command) {
                 return;
             }
 
-            id messageObj = nil;
-            id messageItem = nil;
+            __block id messageObj = nil;
+            __block id messageItem = nil;
             BOOL didLookup = NO;
             loadMessageAndItemForGuid(messageGuid, &messageObj, &messageItem, &didLookup);
 
@@ -1515,6 +1669,114 @@ static void processCommand(NSDictionary *command) {
                     response[@"error"] = [NSString stringWithFormat:@"Edit failed: %@ (history API unavailable)", editSendError];
                 } else {
                     response[@"error"] = [NSString stringWithFormat:@"Edit failed: %@", editSendError];
+                }
+                writeResponse(response);
+                return;
+            }
+            response[@"success"] = @YES;
+
+        } else if ([action isEqualToString:@"edit_scheduled"]) {
+            NSString *messageGuid = command[@"messageGuid"];
+            NSString *text = command[@"text"];
+            NSNumber *scheduledForMs = command[@"scheduledForMs"];
+            NSNumber *partIndex = command[@"partIndex"] ?: @0;
+
+            BOOL hasTextEdit = text.length > 0;
+            BOOL hasScheduleEdit = [scheduledForMs isKindOfClass:[NSNumber class]];
+            if (!messageGuid.length || (!hasTextEdit && !hasScheduleEdit)) {
+                response[@"success"] = @NO;
+                response[@"error"] = @"messageGuid and at least one of text/scheduledForMs are required";
+                writeResponse(response);
+                return;
+            }
+
+            __block id messageObj = nil;
+            __block id messageItem = nil;
+            BOOL didLookup = NO;
+            loadMessageAndItemForGuid(messageGuid, &messageObj, &messageItem, &didLookup);
+
+            __block NSString *scheduledEditError = nil;
+            runOnMainSync(^{
+                if (!messageItem && messageObj) {
+                    messageItem = messageItemFromMessageObject(messageObj);
+                }
+                if (!messageItem) {
+                    scheduledEditError = @"Scheduled message item lookup failed";
+                    return;
+                }
+
+                if (hasTextEdit) {
+                    SEL editScheduledTextSel = NSSelectorFromString(@"editScheduledMessageItem:atPartIndex:withNewPartText:newPartTranslation:");
+                    if (![chat respondsToSelector:editScheduledTextSel]) {
+                        scheduledEditError = @"No supported scheduled text edit selector found";
+                        return;
+                    }
+
+                    @try {
+                        NSMutableAttributedString *edited = [[NSMutableAttributedString alloc] initWithString:text];
+                        ((void (*)(id, SEL, id, NSInteger, id, id))objc_msgSend)(
+                            chat,
+                            editScheduledTextSel,
+                            messageItem,
+                            (NSInteger)[partIndex unsignedIntegerValue],
+                            edited,
+                            nil
+                        );
+                    } @catch (NSException *e) {
+                        scheduledEditError = [NSString stringWithFormat:@"Scheduled text edit exception: %@ - %@", e.name, e.reason];
+                        return;
+                    }
+                }
+
+                if (hasScheduleEdit) {
+                    NSTimeInterval scheduledEpochSeconds = [scheduledForMs doubleValue] / 1000.0;
+                    NSDate *deliveryDate = [NSDate dateWithTimeIntervalSince1970:scheduledEpochSeconds];
+                    if (!deliveryDate || [deliveryDate timeIntervalSinceNow] < 30.0) {
+                        scheduledEditError = @"scheduledForMs must be at least 30 seconds in the future";
+                        return;
+                    }
+
+                    SEL editScheduledTimeSel = NSSelectorFromString(@"editScheduledMessageItem:scheduleType:deliveryTime:");
+                    SEL editScheduledItemsTimeSel = NSSelectorFromString(@"editScheduledMessageItems:scheduleType:deliveryTime:");
+                    if ([chat respondsToSelector:editScheduledTimeSel]) {
+                        @try {
+                            ((void (*)(id, SEL, id, unsigned long long, id))objc_msgSend)(
+                                chat,
+                                editScheduledTimeSel,
+                                messageItem,
+                                kScheduledMessageTypeSendLater,
+                                deliveryDate
+                            );
+                        } @catch (NSException *e) {
+                            scheduledEditError = [NSString stringWithFormat:@"Scheduled delivery-time edit exception: %@ - %@", e.name, e.reason];
+                            return;
+                        }
+                    } else if ([chat respondsToSelector:editScheduledItemsTimeSel]) {
+                        @try {
+                            ((void (*)(id, SEL, id, unsigned long long, id))objc_msgSend)(
+                                chat,
+                                editScheduledItemsTimeSel,
+                                @[messageItem],
+                                kScheduledMessageTypeSendLater,
+                                deliveryDate
+                            );
+                        } @catch (NSException *e) {
+                            scheduledEditError = [NSString stringWithFormat:@"Scheduled delivery-time edit exception: %@ - %@", e.name, e.reason];
+                            return;
+                        }
+                    } else {
+                        scheduledEditError = @"No supported scheduled delivery-time edit selector found";
+                        return;
+                    }
+                }
+            });
+
+            if (scheduledEditError.length) {
+                response[@"success"] = @NO;
+                if (!didLookup) {
+                    response[@"error"] = [NSString stringWithFormat:@"Scheduled edit failed: %@ (history API unavailable)", scheduledEditError];
+                } else {
+                    response[@"error"] = [NSString stringWithFormat:@"Scheduled edit failed: %@", scheduledEditError];
                 }
                 writeResponse(response);
                 return;

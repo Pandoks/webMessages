@@ -28,6 +28,16 @@ export const POST: RequestHandler = async ({ request }) => {
 			return json({ success: false, skipped: 'bridge_unavailable' });
 		}
 
+		if (message.includes('Chat not found:') && message.includes('registry chats: 0')) {
+			// Bridge is up but still warming chat registry; mark-read is best-effort.
+			const now = Date.now();
+			if (now - lastBridgeUnavailableLogAt > 30000) {
+				console.warn('Mark read skipped:', message);
+				lastBridgeUnavailableLogAt = now;
+			}
+			return json({ success: false, skipped: 'bridge_not_ready' });
+		}
+
 		console.error('Mark read error:', err);
 		const status = message.includes('timeout - no response received') ? 504 : 500;
 		return json({ error: message }, { status });

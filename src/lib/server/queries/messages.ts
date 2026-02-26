@@ -16,6 +16,8 @@ interface MessageRow {
 	date_delivered: number;
 	date_retracted: number;
 	date_edited: number;
+	schedule_type: number;
+	schedule_state: number;
 	is_delivered: number;
 	is_sent: number;
 	is_read: number;
@@ -49,6 +51,8 @@ const MESSAGE_COLUMNS = `
 	m.date_delivered,
 	COALESCE(m.date_retracted, 0) as date_retracted,
 	COALESCE(m.date_edited, 0) as date_edited,
+	COALESCE(m.schedule_type, 0) as schedule_type,
+	COALESCE(m.schedule_state, 0) as schedule_state,
 	m.is_delivered,
 	m.is_sent,
 	m.is_read,
@@ -191,6 +195,8 @@ function rowToMessage(row: MessageRow, chatId: number, chatGuid?: string): Messa
 		date_delivered: row.date_delivered ? appleToUnixMs(row.date_delivered) : null,
 		date_retracted: effectiveDateRetracted ? appleToUnixMs(effectiveDateRetracted) : null,
 		date_edited: effectiveDateEdited ? appleToUnixMs(effectiveDateEdited) : null,
+		schedule_type: row.schedule_type,
+		schedule_state: row.schedule_state,
 		is_delivered: row.is_delivered === 1,
 		is_sent: row.is_sent === 1,
 		is_read: row.is_read === 1,

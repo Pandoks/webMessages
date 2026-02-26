@@ -27,6 +27,7 @@ interface IMCoreCommand {
 	reactionType?: number;
 	text?: string;
 	partIndex?: number;
+	scheduledForMs?: number;
 }
 
 interface IMCoreResponse {
@@ -47,7 +48,7 @@ function sleep(ms: number): Promise<void> {
 
 async function ensureBridgeRunning(): Promise<void> {
 	if (!(await isBridgeRunning())) {
-		throw new Error(`IMCore bridge is not running. Start it with ./scripts/start-messages.sh`);
+		throw new Error(`IMCore bridge is not running. Start it with ./scripts/server/start-messages.sh`);
 	}
 }
 
@@ -96,7 +97,7 @@ async function sendCommand(command: IMCoreCommand, timeoutMs = DEFAULT_TIMEOUT):
 		if (now >= nextBridgeHealthCheck) {
 			if (!(await isBridgeRunning())) {
 				throw new Error(
-					'IMCore bridge exited while waiting for response. Start it with ./scripts/start-messages.sh'
+					'IMCore bridge exited while waiting for response. Start it with ./scripts/server/start-messages.sh'
 				);
 			}
 			nextBridgeHealthCheck = now + BRIDGE_HEALTH_CHECK_INTERVAL;
@@ -212,6 +213,29 @@ export async function sendEdit(
 	);
 }
 
+export async function sendEditScheduled(
+	chatGuid: string,
+	messageGuid: string,
+	options: {
+		text?: string;
+		partIndex?: number;
+		scheduledForMs?: number;
+	}
+): Promise<void> {
+	await sendChecked(
+		createCommand('edit_scheduled', chatGuid, {
+			messageGuid,
+			text: options.text,
+			partIndex: options.partIndex ?? 0,
+			scheduledForMs: options.scheduledForMs
+		}),
+		{
+			timeoutMs: REPLY_TIMEOUT,
+			errorMessage: 'Failed to edit scheduled message'
+		}
+	);
+}
+
 export async function markAsRead(chatGuid: string): Promise<void> {
 	const createMarkReadCommand = () => createCommand('mark_read', chatGuid);
 
@@ -235,4 +259,21 @@ export async function markAsRead(chatGuid: string): Promise<void> {
 	if (!response.success) {
 		throw new Error(response.error ?? 'Failed to mark as read');
 	}
+}
+
+export async function sendScheduledMessage(
+	chatGuid: string,
+	text: string,
+	scheduledForMs: number
+): Promise<void> {
+	await sendChecked(
+		createCommand('send_scheduled', chatGuid, {
+			text,
+			scheduledForMs
+		}),
+		{
+			timeoutMs: REPLY_TIMEOUT,
+			errorMessage: 'Failed to schedule message'
+		}
+	);
 }

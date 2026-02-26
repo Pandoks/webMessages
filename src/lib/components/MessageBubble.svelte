@@ -3,7 +3,7 @@
 	import ReactionBadge from './ReactionBadge.svelte';
 	import ReplyPreview from './ReplyPreview.svelte';
 	import AttachmentPreview from './AttachmentPreview.svelte';
-	import { formatMessageTime } from '$lib/utils/date.js';
+	import { formatMessageTime, formatScheduledTime } from '$lib/utils/date.js';
 
 	let {
 		message,
@@ -24,9 +24,22 @@
 	const isSent = $derived(message.is_from_me);
 	const isRetracted = $derived(message.date_retracted && message.date_retracted > 0);
 	const isEdited = $derived(message.date_edited && message.date_edited > 0);
+	const isScheduledPending = $derived(
+		message.schedule_type === 2 && !isRetracted && message.date > Date.now()
+	);
 	const isGroupAction = $derived(message.group_title !== null && message.group_action_type > 0);
+	const bubbleClass = $derived.by(() => {
+		if (isSent && isScheduledPending) {
+			return 'border border-dashed border-blue-400 bg-transparent text-blue-600';
+		}
+		if (isSent) {
+			return 'bg-blue-500 text-white';
+		}
+		return 'bg-[#e9e9eb] text-gray-900';
+	});
 
 const timeStr = $derived(formatMessageTime(message.date));
+const scheduledStr = $derived(formatScheduledTime(message.date));
 
 function cleanAttachmentPlaceholder(text: string): string {
 	// iMessage often prefixes attachment messages with U+FFFC object replacement chars.
@@ -68,9 +81,7 @@ const displayText = $derived.by(() => {
 			<div class="relative">
 				<div
 					class="inline-block rounded-2xl px-3 py-2 text-[15px] leading-relaxed break-words
-						{isSent
-							? 'bg-blue-500 text-white'
-							: 'bg-[#e9e9eb] text-gray-900'}
+						{bubbleClass}
 						{isRetracted ? 'italic opacity-60' : ''}"
 				>
 					{#if message.attachments && message.attachments.length > 0}
@@ -87,6 +98,16 @@ const displayText = $derived.by(() => {
 
 					{#if isEdited && !isRetracted}
 						<span class="ml-1 text-[10px] {isSent ? 'text-blue-200' : 'text-gray-400'}">Edited</span>
+					{/if}
+
+					{#if isScheduledPending}
+						<div class="mt-1 flex items-center gap-1 text-[10px] {isSent ? 'text-blue-500' : 'text-gray-500'}">
+							<svg class="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+								<circle cx="12" cy="12" r="9" stroke-width="2"></circle>
+								<path stroke-linecap="round" stroke-width="2" d="M12 7v5l3 2"></path>
+							</svg>
+							<span>Scheduled for {scheduledStr}</span>
+						</div>
 					{/if}
 				</div>
 
