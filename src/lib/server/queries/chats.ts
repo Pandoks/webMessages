@@ -64,6 +64,13 @@ const UNREAD_COUNT_SQL = `
 	) as unread_count
 `;
 
+// Exclude pending "Send Later" rows from sidebar preview/last-message selection.
+const LAST_MESSAGE_FILTER_SQL = `
+	m3.associated_message_type = 0
+	AND m3.item_type = 0
+	AND COALESCE(m3.schedule_state, 0) != 2
+`;
+
 function chatListStmt() {
 	if (!_chatListStmt) {
 		_chatListStmt = getDb().prepare<[], ChatRow>(`
@@ -89,16 +96,15 @@ function chatListStmt() {
 			FROM chat c
 			INNER JOIN chat_message_join cmj ON cmj.chat_id = c.ROWID
 			INNER JOIN message m ON m.ROWID = cmj.message_id
-			WHERE m.ROWID = (
-				SELECT cmj3.message_id
-				FROM chat_message_join cmj3
-				INNER JOIN message m3 ON m3.ROWID = cmj3.message_id
-				WHERE cmj3.chat_id = c.ROWID
-					AND m3.associated_message_type = 0
-					AND m3.item_type = 0
-				ORDER BY m3.date DESC
-				LIMIT 1
-			)
+				WHERE m.ROWID = (
+					SELECT cmj3.message_id
+					FROM chat_message_join cmj3
+					INNER JOIN message m3 ON m3.ROWID = cmj3.message_id
+					WHERE cmj3.chat_id = c.ROWID
+						AND ${LAST_MESSAGE_FILTER_SQL}
+					ORDER BY m3.date DESC
+					LIMIT 1
+				)
 			ORDER BY m.date DESC
 		`);
 	}
@@ -145,17 +151,16 @@ function chatByIdStmt() {
 			FROM chat c
 			LEFT JOIN chat_message_join cmj ON cmj.chat_id = c.ROWID
 			LEFT JOIN message m ON m.ROWID = cmj.message_id
-			WHERE c.ROWID = ?
-				AND m.ROWID = (
-					SELECT cmj3.message_id
-					FROM chat_message_join cmj3
-					JOIN message m3 ON m3.ROWID = cmj3.message_id
-					WHERE cmj3.chat_id = c.ROWID
-						AND m3.associated_message_type = 0
-						AND m3.item_type = 0
-					ORDER BY m3.date DESC
-					LIMIT 1
-				)
+				WHERE c.ROWID = ?
+					AND m.ROWID = (
+						SELECT cmj3.message_id
+						FROM chat_message_join cmj3
+						JOIN message m3 ON m3.ROWID = cmj3.message_id
+						WHERE cmj3.chat_id = c.ROWID
+							AND ${LAST_MESSAGE_FILTER_SQL}
+						ORDER BY m3.date DESC
+						LIMIT 1
+					)
 		`);
 	}
 	return _chatByIdStmt;
