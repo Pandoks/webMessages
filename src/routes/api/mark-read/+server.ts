@@ -30,11 +30,6 @@ export const POST: RequestHandler = async ({ request }) => {
 
 		if (message.includes('Chat not found:') && message.includes('registry chats: 0')) {
 			// Bridge is up but still warming chat registry; mark-read is best-effort.
-			const now = Date.now();
-			if (now - lastBridgeUnavailableLogAt > 30000) {
-				console.warn('Mark read skipped:', message);
-				lastBridgeUnavailableLogAt = now;
-			}
 			return json({ success: false, skipped: 'bridge_not_ready' });
 		}
 

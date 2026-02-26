@@ -34,8 +34,23 @@ function directMergeKey(participants: Participant[]): string | null {
 	return `direct:${keys.join('|')}`;
 }
 
+function looksLikeContactIdentifier(value: string): boolean {
+	const trimmed = value.trim();
+	if (!trimmed) return false;
+	if (trimmed.includes('@')) return true;
+	return isPhoneNumber(trimmed);
+}
+
 function resolveDisplayName(chat: Chat, participants: Participant[]): string {
-	if (chat.display_name) return chat.display_name;
+	const existingName = chat.display_name?.trim();
+	const directNameLooksRaw =
+		chat.style === DIRECT_CHAT_STYLE &&
+		!!existingName &&
+		looksLikeContactIdentifier(existingName);
+
+	if (existingName && !directNameLooksRaw) {
+		return existingName;
+	}
 	if (participants.length === 1) {
 		return resolveContact(participants[0].handle_identifier);
 	}
@@ -47,6 +62,7 @@ function resolveDisplayName(chat: Chat, participants: Participant[]): string {
 		if (participants.length > 3) label += ` + ${participants.length - 3}`;
 		return label;
 	}
+	if (existingName) return existingName;
 	return resolveContact(chat.chat_identifier);
 }
 

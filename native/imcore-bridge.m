@@ -1183,8 +1183,31 @@ static void processCommand(NSDictionary *command) {
             }
         }
 
+        __block NSUInteger chatCount = 0;
+        runOnMainSync(^{
+            chatCount = chatCountFromRegistry(registry);
+        });
+
+        if (!chat && [action isEqualToString:@"mark_read"] && chatCount == 0) {
+            // IMCore registry can be empty briefly after bridge startup.
+            // Force a daemon/chat refresh and retry before failing mark-read.
+            runOnMainSync(^{
+                bootstrapDaemonConnection();
+            });
+
+            for (NSInteger attempt = 0; attempt < 20; attempt++) {
+                runOnMainSync(^{
+                    chat = resolveChatSingleAttempt(registry, chatGuid);
+                    chatCount = chatCountFromRegistry(registry);
+                });
+                if (chat) break;
+                if (attempt < 19) {
+                    usleep(250 * 1000);
+                }
+            }
+        }
+
         if (!chat) {
-            __block NSUInteger chatCount = 0;
             runOnMainSync(^{
                 chatCount = chatCountFromRegistry(registry);
             });

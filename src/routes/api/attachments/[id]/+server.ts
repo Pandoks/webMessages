@@ -93,16 +93,23 @@ async function transcodeVideoToMp4(filePath: string, attachmentId: number): Prom
 	const job = (async () => {
 		const tempPath = join(videoCacheDir, `${attachmentId}.${Date.now()}.tmp.mp4`);
 		try {
-			await execFileAsync(
-				'ffmpeg',
-				[
+			const runFfmpeg = async (withAudio: boolean) => {
+				const args = [
 					'-y',
 					'-i',
 					filePath,
 					'-map',
-					'0:v:0',
-					'-map',
-					'0:a?',
+					'0:v:0'
+				];
+				if (withAudio) {
+					// Use only the first audio stream. Some iPhone MOVs include
+					// additional unsupported audio tracks (e.g. apac) that break transcode.
+					args.push('-map', '0:a:0?');
+				} else {
+					args.push('-an');
+				}
+				args.push(
+					'-dn',
 					'-c:v',
 					'libx264',
 					'-preset',
@@ -110,20 +117,29 @@ async function transcodeVideoToMp4(filePath: string, attachmentId: number): Prom
 					'-crf',
 					'23',
 					'-pix_fmt',
-					'yuv420p',
-					'-c:a',
-					'aac',
-					'-b:a',
-					'128k',
-					'-movflags',
-					'+faststart',
-					tempPath
-				],
-				{
+					'yuv420p'
+				);
+				if (withAudio) {
+					args.push(
+						'-c:a',
+						'aac',
+						'-b:a',
+						'128k'
+					);
+				}
+				args.push('-movflags', '+faststart', tempPath);
+				await execFileAsync('ffmpeg', args, {
 					timeout: 300000,
 					maxBuffer: 8 * 1024 * 1024
-				}
-			);
+				});
+			};
+
+			try {
+				await runFfmpeg(true);
+			} catch (errWithAudio) {
+				console.warn('Video transcode with audio failed, retrying without audio track:', errWithAudio);
+				await runFfmpeg(false);
+			}
 
 			if (existsSync(cachedPath)) {
 				rmSync(tempPath, { force: true });
