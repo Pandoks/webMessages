@@ -276,12 +276,6 @@ function loadNickNamePhotos(targetMap: Map<string, { path: string; mime: string 
 		if (!existsSync(dbPath)) continue;
 
 		try {
-			// Use sqlite3 CLI to extract key-value pairs (read-only)
-			const result = execFileSync('sqlite3', [dbPath, 'SELECT key, value FROM kvtable'], {
-				timeout: 5000,
-				maxBuffer: 5 * 1024 * 1024
-			});
-
 			// Each row: key|value(binary). We need to extract the image path from the plist.
 			// Since the value is binary, we'll use a different approach:
 			// Extract keys, then decode each plist individually.
@@ -508,6 +502,33 @@ export interface ContactGroupMatch {
 	identifiers: string[];
 }
 
+function scoreNameMatch(name: string, query: string): number {
+	if (name === query) return 3;
+	if (name.startsWith(query)) return 2;
+	if (name.includes(query)) return 1;
+	return 0;
+}
+
+function contactIdentifiers(contact: Contact): string[] {
+	return [...contact.phones, ...contact.emails]
+		.map((value) => value.trim())
+		.filter((value) => value.length > 0);
+}
+
+function uniqueCaseInsensitive(values: string[]): string[] {
+	const seen = new Set<string>();
+	const unique: string[] = [];
+
+	for (const value of values) {
+		const key = value.toLowerCase();
+		if (seen.has(key)) continue;
+		seen.add(key);
+		unique.push(value);
+	}
+
+	return unique;
+}
+
 /** Find contact identifiers by display name query (exact > prefix > contains). */
 export function findContactMatches(query: string, limit = 5): ContactMatch[] {
 	const q = query.trim().toLowerCase();
@@ -518,21 +539,11 @@ export function findContactMatches(query: string, limit = 5): ContactMatch[] {
 	for (const contact of contacts) {
 		const name = contact.name.trim();
 		if (!name) continue;
-		const lower = name.toLowerCase();
-
-		let score = 0;
-		if (lower === q) score = 3;
-		else if (lower.startsWith(q)) score = 2;
-		else if (lower.includes(q)) score = 1;
+		const score = scoreNameMatch(name.toLowerCase(), q);
 		if (score === 0) continue;
 
-		for (const phone of contact.phones) {
-			if (!phone) continue;
-			candidates.push({ score, name: contact.name, identifier: phone });
-		}
-		for (const email of contact.emails) {
-			if (!email) continue;
-			candidates.push({ score, name: contact.name, identifier: email });
+		for (const identifier of contactIdentifiers(contact)) {
+			candidates.push({ score, name, identifier });
 		}
 	}
 
@@ -560,17 +571,12 @@ export function findContactGroupMatches(query: string, limit = 5): ContactGroupM
 	for (const contact of contacts) {
 		const name = contact.name.trim();
 		if (!name) continue;
-		const lower = name.toLowerCase();
-
-		let score = 0;
-		if (lower === q) score = 3;
-		else if (lower.startsWith(q)) score = 2;
-		else if (lower.includes(q)) score = 1;
+		const score = scoreNameMatch(name.toLowerCase(), q);
 		if (score === 0) continue;
 
-		const identifiers = [...contact.phones, ...contact.emails].filter((v) => !!v);
+		const identifiers = contactIdentifiers(contact);
 		if (identifiers.length === 0) continue;
-		candidates.push({ score, name: contact.name, identifiers });
+		candidates.push({ score, name, identifiers });
 	}
 
 	candidates.sort((a, b) => b.score - a.score || a.name.localeCompare(b.name));
@@ -595,14 +601,10 @@ export function getRelatedContactIdentifiers(identifier: string): string[] {
 	const contact = getAllContacts().find((c) => c.name === name);
 	if (!contact) return [input];
 
-	const ids = [...contact.phones, ...contact.emails]
-		.map((v) => v.trim())
-		.filter((v) => !!v);
+	const ids = contactIdentifiers(contact);
 	if (ids.length === 0) return [input];
 
-	const unique = Array.from(new Set(ids.map((v) => v.toLowerCase()))).map(
-		(key) => ids.find((v) => v.toLowerCase() === key)!
-	);
+	const unique = uniqueCaseInsensitive(ids);
 	if (!unique.some((v) => v.toLowerCase() === lower)) unique.push(input);
 	return unique;
 }

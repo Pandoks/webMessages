@@ -11,6 +11,8 @@ type MergedChat = Chat & {
 	merged_chat_guids: string[];
 };
 
+const DIRECT_CHAT_STYLE = 45;
+
 function canonicalIdentifier(identifier: string): string {
 	const trimmed = identifier.trim();
 	if (!trimmed) return '';
@@ -50,11 +52,13 @@ function resolveDisplayName(chat: Chat, participants: Participant[]): string {
 
 function pinCandidates(chat: Chat, participants: Participant[]): string[] {
 	const out: string[] = [];
+	const seen = new Set<string>();
 	const add = (value: string | null | undefined) => {
 		if (!value) return;
 		const trimmed = value.trim();
 		if (!trimmed) return;
-		if (out.includes(trimmed)) return;
+		if (seen.has(trimmed)) return;
+		seen.add(trimmed);
 		out.push(trimmed);
 	};
 
@@ -68,13 +72,30 @@ function pinCandidates(chat: Chat, participants: Participant[]): string[] {
 	}
 
 	// Contact-handle pins should only match direct chats.
-	if (chat.style === 45) {
+	if (chat.style === DIRECT_CHAT_STYLE) {
 		for (const p of participants) {
 			add(p.handle_identifier);
 		}
 	}
 
 	return out;
+}
+
+function mergeParticipants(existing: Participant[] = [], incoming: Participant[]): Participant[] {
+	const merged = new Map<string, Participant>(
+		existing.map((participant) => [participant.handle_identifier.toLowerCase(), participant])
+	);
+	for (const participant of incoming) {
+		const key = participant.handle_identifier.toLowerCase();
+		if (!merged.has(key)) {
+			merged.set(key, participant);
+		}
+	}
+	return Array.from(merged.values());
+}
+
+function pushUnique<T>(items: T[], value: T) {
+	if (!items.includes(value)) items.push(value);
 }
 
 export const GET: RequestHandler = () => {
@@ -94,7 +115,10 @@ export const GET: RequestHandler = () => {
 		chat.pin_rank = getPinnedRank(pinCandidates(chat, participants));
 		chat.is_pinned = chat.pin_rank !== null;
 
-		const key = chat.style === 45 ? directMergeKey(participants) ?? `chat:${chat.rowid}` : `chat:${chat.rowid}`;
+		const key =
+			chat.style === DIRECT_CHAT_STYLE
+				? directMergeKey(participants) ?? `chat:${chat.rowid}`
+				: `chat:${chat.rowid}`;
 		const existing = merged.get(key);
 		if (!existing) {
 			merged.set(key, {
@@ -114,24 +138,9 @@ export const GET: RequestHandler = () => {
 			existing.is_pinned = chat.is_pinned;
 		}
 
-		const participantMap = new Map<string, Participant>();
-		for (const p of existing.participants ?? []) {
-			participantMap.set(p.handle_identifier.toLowerCase(), p);
-		}
-		for (const p of participants) {
-			const participantKey = p.handle_identifier.toLowerCase();
-			if (!participantMap.has(participantKey)) {
-				participantMap.set(participantKey, p);
-			}
-		}
-		existing.participants = Array.from(participantMap.values());
-
-		if (!existing.merged_chat_ids.includes(chat.rowid)) {
-			existing.merged_chat_ids.push(chat.rowid);
-		}
-		if (!existing.merged_chat_guids.includes(chat.guid)) {
-			existing.merged_chat_guids.push(chat.guid);
-		}
+		existing.participants = mergeParticipants(existing.participants, participants);
+		pushUnique(existing.merged_chat_ids, chat.rowid);
+		pushUnique(existing.merged_chat_guids, chat.guid);
 
 		const existingLast = existing.last_message?.date ?? 0;
 		const incomingLast = chat.last_message?.date ?? 0;

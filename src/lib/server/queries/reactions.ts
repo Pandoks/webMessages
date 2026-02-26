@@ -11,49 +11,15 @@ interface ReactionRow {
 	handle_identifier: string | null;
 }
 
-let _reactionsByChatStmt: ReturnType<ReturnType<typeof getDb>['prepare']> | null = null;
+type DbStmt = ReturnType<ReturnType<typeof getDb>['prepare']>;
 
-function reactionsByChatStmt() {
-	if (!_reactionsByChatStmt) {
-		_reactionsByChatStmt = getDb().prepare(`
-			SELECT
-				m.ROWID as rowid,
-				m.associated_message_guid,
-				m.associated_message_type,
-				m.associated_message_emoji,
-				m.handle_id,
-				m.is_from_me,
-				h.id as handle_identifier
-			FROM message m
-			JOIN chat_message_join cmj ON m.ROWID = cmj.message_id
-			LEFT JOIN handle h ON m.handle_id = h.ROWID
-			WHERE cmj.chat_id = ?
-				AND m.associated_message_type >= 2000
-				AND m.associated_message_type <= 3006
-			ORDER BY m.ROWID ASC
-		`);
-	}
-	return _reactionsByChatStmt;
-}
+const reactionsByChatsStmtCache = new Map<number, DbStmt>();
 
-export function getReactionsByChat(chatId: number): Reaction[] {
-	const rows = reactionsByChatStmt().all(chatId) as ReactionRow[];
-	return rows.map((row) => ({
-		message_rowid: row.rowid,
-		associated_message_guid: row.associated_message_guid,
-		associated_message_type: row.associated_message_type,
-		handle_id: row.handle_id,
-		sender: row.handle_identifier ?? 'Me',
-		emoji: row.associated_message_emoji,
-		is_from_me: row.is_from_me === 1
-	}));
-}
+function reactionsByChatsStmt(chatCount: number): DbStmt {
+	const cached = reactionsByChatsStmtCache.get(chatCount);
+	if (cached) return cached;
 
-export function getReactionsByChats(chatIds: number[]): Reaction[] {
-	if (chatIds.length === 0) return [];
-	if (chatIds.length === 1) return getReactionsByChat(chatIds[0]);
-
-	const placeholders = chatIds.map(() => '?').join(',');
+	const placeholders = Array.from({ length: chatCount }, () => '?').join(',');
 	const stmt = getDb().prepare(`
 		SELECT
 			m.ROWID as rowid,
@@ -71,8 +37,12 @@ export function getReactionsByChats(chatIds: number[]): Reaction[] {
 			AND m.associated_message_type <= 3006
 		ORDER BY m.ROWID ASC
 	`);
-	const rows = stmt.all(...chatIds) as ReactionRow[];
-	return rows.map((row) => ({
+	reactionsByChatsStmtCache.set(chatCount, stmt);
+	return stmt;
+}
+
+function rowToReaction(row: ReactionRow): Reaction {
+	return {
 		message_rowid: row.rowid,
 		associated_message_guid: row.associated_message_guid,
 		associated_message_type: row.associated_message_type,
@@ -80,5 +50,16 @@ export function getReactionsByChats(chatIds: number[]): Reaction[] {
 		sender: row.handle_identifier ?? 'Me',
 		emoji: row.associated_message_emoji,
 		is_from_me: row.is_from_me === 1
-	}));
+	};
+}
+
+export function getReactionsByChat(chatId: number): Reaction[] {
+	return getReactionsByChats([chatId]);
+}
+
+export function getReactionsByChats(chatIds: number[]): Reaction[] {
+	if (chatIds.length === 0) return [];
+
+	const rows = reactionsByChatsStmt(chatIds.length).all(...chatIds) as ReactionRow[];
+	return rows.map(rowToReaction);
 }

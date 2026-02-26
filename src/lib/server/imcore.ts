@@ -36,6 +36,11 @@ interface IMCoreResponse {
 	[key: string]: unknown;
 }
 
+interface SendCheckedOptions {
+	timeoutMs?: number;
+	errorMessage: string;
+}
+
 function sleep(ms: number): Promise<void> {
 	return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -107,44 +112,53 @@ function enqueue<T>(fn: () => Promise<T>): Promise<T> {
 	return result;
 }
 
+function createCommand(
+	action: string,
+	chatGuid: string,
+	extra: Omit<Partial<IMCoreCommand>, 'id' | 'action' | 'chatGuid'> = {}
+): Omit<IMCoreCommand, 'id'> {
+	return {
+		action,
+		chatGuid,
+		...extra
+	};
+}
+
+async function sendChecked(
+	command: Omit<IMCoreCommand, 'id'>,
+	{ timeoutMs = DEFAULT_TIMEOUT, errorMessage }: SendCheckedOptions
+): Promise<IMCoreResponse> {
+	const response = await enqueue(() => sendCommand({ id: randomUUID(), ...command }, timeoutMs));
+	if (!response.success) {
+		throw new Error(response.error ?? errorMessage);
+	}
+	return response;
+}
+
 export async function sendReaction(
 	chatGuid: string,
 	messageGuid: string,
 	reactionType: number,
 	partIndex?: number
 ): Promise<void> {
-	const response = await enqueue(() =>
-		sendCommand({
-			id: randomUUID(),
-			action: 'react',
-			chatGuid,
+	await sendChecked(
+		createCommand('react', chatGuid, {
 			messageGuid,
 			reactionType,
 			partIndex: partIndex ?? 0
-		})
+		}),
+		{ errorMessage: 'Failed to send reaction' }
 	);
-
-	if (!response.success) {
-		throw new Error(response.error ?? 'Failed to send reaction');
-	}
 }
 
 export async function sendUnsend(
 	chatGuid: string,
 	messageGuid: string
 ): Promise<void> {
-	const response = await enqueue(() =>
-		sendCommand({
-			id: randomUUID(),
-			action: 'unsend',
-			chatGuid,
-			messageGuid
-		})
+	await sendChecked(
+		createCommand('unsend', chatGuid, { messageGuid }),
+		{ errorMessage: 'Failed to unsend message' }
 	);
-
-	if (!response.success) {
-		throw new Error(response.error ?? 'Failed to unsend message');
-	}
 }
 
 export async function debugUnsend(
@@ -155,10 +169,10 @@ export async function debugUnsend(
 	return enqueue(() =>
 		sendCommand({
 			id: randomUUID(),
-			action: 'debug_unsend',
-			chatGuid,
-			messageGuid,
-			partIndex: partIndex ?? 0
+			...createCommand('debug_unsend', chatGuid, {
+				messageGuid,
+				partIndex: partIndex ?? 0
+			})
 		})
 	);
 }
@@ -169,23 +183,17 @@ export async function sendReply(
 	text: string,
 	partIndex?: number
 ): Promise<void> {
-	const response = await enqueue(() =>
-		sendCommand(
-			{
-				id: randomUUID(),
-				action: 'reply',
-				chatGuid,
-				messageGuid,
-				text,
-				partIndex: partIndex ?? 0
-			},
-			REPLY_TIMEOUT
-		)
+	await sendChecked(
+		createCommand('reply', chatGuid, {
+			messageGuid,
+			text,
+			partIndex: partIndex ?? 0
+		}),
+		{
+			timeoutMs: REPLY_TIMEOUT,
+			errorMessage: 'Failed to send reply'
+		}
 	);
-
-	if (!response.success) {
-		throw new Error(response.error ?? 'Failed to send reply');
-	}
 }
 
 export async function sendEdit(
@@ -194,33 +202,22 @@ export async function sendEdit(
 	text: string,
 	partIndex?: number
 ): Promise<void> {
-	const response = await enqueue(() =>
-		sendCommand({
-			id: randomUUID(),
-			action: 'edit',
-			chatGuid,
+	await sendChecked(
+		createCommand('edit', chatGuid, {
 			messageGuid,
 			text,
 			partIndex: partIndex ?? 0
-		})
+		}),
+		{ errorMessage: 'Failed to edit message' }
 	);
-
-	if (!response.success) {
-		throw new Error(response.error ?? 'Failed to edit message');
-	}
 }
 
 export async function markAsRead(chatGuid: string): Promise<void> {
+	const createMarkReadCommand = () => createCommand('mark_read', chatGuid);
+
 	const response = await enqueue(async () => {
 		try {
-			return await sendCommand(
-				{
-					id: randomUUID(),
-					action: 'mark_read',
-					chatGuid
-				},
-				MARK_READ_TIMEOUT
-			);
+			return await sendCommand({ id: randomUUID(), ...createMarkReadCommand() }, MARK_READ_TIMEOUT);
 		} catch (err) {
 			if (
 				err instanceof Error &&
@@ -231,14 +228,7 @@ export async function markAsRead(chatGuid: string): Promise<void> {
 			// Bridge can be briefly unavailable during restart/hot-reload.
 			// Retry once before failing.
 			await sleep(250);
-			return sendCommand(
-				{
-					id: randomUUID(),
-					action: 'mark_read',
-					chatGuid
-				},
-				MARK_READ_TIMEOUT
-			);
+			return sendCommand({ id: randomUUID(), ...createMarkReadCommand() }, MARK_READ_TIMEOUT);
 		}
 	});
 

@@ -30,11 +30,43 @@ import {
 	getCachedParticipantsFromDb
 } from '$lib/db/client-db.js';
 import { isReactionType, isReactionRemoval, parseAssociatedGuid } from '$lib/utils/reactions.js';
-import type { Message } from '$lib/types/index.js';
+import type { Chat, Message, Participant } from '$lib/types/index.js';
 
 let activeChatId: number | null = null;
 let unsubscribeMessages: (() => void) | null = null;
 let unsubscribeContacts: (() => void) | null = null;
+
+function refreshVisibleData() {
+	void refreshChatList();
+	if (activeChatId !== null) {
+		void loadChat(activeChatId);
+	}
+}
+
+function isActiveChat(chatId: number): boolean {
+	return activeChatId === chatId;
+}
+
+async function fetchJson<T>(url: string): Promise<T | null> {
+	const res = await fetch(url);
+	if (!res.ok) return null;
+	return (await res.json()) as T;
+}
+
+function applyChatPayload(
+	chatId: number,
+	payload: { messages?: Message[]; participants?: Participant[] }
+): void {
+	if (payload.messages) {
+		setChatMessages(chatId, payload.messages);
+		cacheMessages(payload.messages);
+	}
+
+	if (payload.participants) {
+		setParticipants(chatId, payload.participants);
+		cacheParticipantsInDb(chatId, payload.participants);
+	}
+}
 
 /** Initialize the sync engine. Call once from layout onMount. */
 export function initSync() {
@@ -49,12 +81,7 @@ export function initSync() {
 
 	// 4. Register SSE handlers
 	unsubscribeMessages = onNewMessages(handleNewMessages);
-	unsubscribeContacts = onContactsReady(() => {
-		refreshChatList();
-		if (activeChatId !== null) {
-			loadChat(activeChatId);
-		}
-	});
+	unsubscribeContacts = onContactsReady(refreshVisibleData);
 
 	return () => {
 		if (unsubscribeMessages) {
@@ -73,42 +100,33 @@ export function initSync() {
 export async function loadChat(chatId: number) {
 	activeChatId = chatId;
 	clearChatUnread(chatId);
-	const chatStore = getChatStore();
 
 	// If messages are already loaded, skip to background refresh
-	const cached = chatStore.getMessages(chatId);
+	const cached = getChatStore().getMessages(chatId);
 	if (cached.length === 0) {
 		// Try IndexedDB
 		const dbMessages = await getCachedMessages(chatId, 100);
-		if (dbMessages.length > 0 && activeChatId === chatId) {
+		if (dbMessages.length > 0 && isActiveChat(chatId)) {
 			setChatMessages(chatId, dbMessages);
 		}
 
 		// Try IndexedDB for participants
 		const dbParticipants = await getCachedParticipantsFromDb(chatId);
-		if (dbParticipants.length > 0 && activeChatId === chatId) {
+		if (dbParticipants.length > 0 && isActiveChat(chatId)) {
 			setParticipants(chatId, dbParticipants);
 		}
 	}
 
 	// Background fetch from API
 	try {
-		const res = await fetch(`/api/messages/${chatId}?limit=100`);
-		if (!res.ok) return;
-		const data = await res.json();
+		const data = await fetchJson<{ messages?: Message[]; participants?: Participant[] }>(
+			`/api/messages/${chatId}?limit=100`
+		);
+		if (!data) return;
 
 		// Only apply if this chat is still active
-		if (activeChatId !== chatId) return;
-
-		if (data.messages) {
-			setChatMessages(chatId, data.messages);
-			cacheMessages(data.messages);
-		}
-
-		if (data.participants) {
-			setParticipants(chatId, data.participants);
-			cacheParticipantsInDb(chatId, data.participants);
-		}
+		if (!isActiveChat(chatId)) return;
+		applyChatPayload(chatId, data);
 	} catch (err) {
 		console.error('Failed to load chat:', err);
 	}
@@ -138,10 +156,12 @@ export async function loadOlderMessages(
 
 	// Fetch from server
 	try {
-		const offset = currentCount + (cached.length > 0 ? cached.length : 0);
-		const res = await fetch(`/api/messages/${chatId}?limit=${PAGE_SIZE}&offset=${offset}`);
-		if (!res.ok) return { hasMore: false };
-		const data = await res.json();
+		const offset = currentCount + cached.length;
+		const data = await fetchJson<{ messages?: Message[] }>(
+			`/api/messages/${chatId}?limit=${PAGE_SIZE}&offset=${offset}`
+		);
+		if (!data) return { hasMore: false };
+
 		const older: Message[] = data.messages ?? [];
 
 		if (older.length > 0) {
@@ -208,19 +228,16 @@ function handleNewMessages(events: { chatId: number; message: Message }[]) {
 	const knownChatIds = new Set(chatStore.chats.map((c) => c.rowid));
 	const hasUnknown = events.some((e) => !knownChatIds.has(e.chatId));
 	if (hasUnknown) {
-		refreshChatList();
-		if (activeChatId !== null) {
-			loadChat(activeChatId);
-		}
+		refreshVisibleData();
 	}
 }
 
 /** Fetch fresh chat list from API */
 export async function refreshChatList() {
 	try {
-		const res = await fetch('/api/chats');
-		if (!res.ok) return;
-		const data = await res.json();
+		const data = await fetchJson<{ chats?: Chat[] }>('/api/chats');
+		if (!data) return;
+
 		if (data.chats) {
 			setServerChats(data.chats);
 		}
@@ -260,10 +277,7 @@ export function setupReconnectionHandler() {
 		} else if (wasDisconnected) {
 			wasDisconnected = false;
 			// Reconnected — refresh to catch missed messages
-			refreshChatList();
-			if (activeChatId !== null) {
-				loadChat(activeChatId);
-			}
+			refreshVisibleData();
 		}
 	};
 }

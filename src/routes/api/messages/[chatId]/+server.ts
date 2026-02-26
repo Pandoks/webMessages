@@ -10,14 +10,44 @@ import {
 } from '$lib/server/queries/chats.js';
 import { getRelatedContactIdentifiers, resolveContact } from '$lib/server/contacts.js';
 import { aggregateReactions } from '$lib/utils/reactions.js';
-import type { Message } from '$lib/types/index.js';
+import type { Participant } from '$lib/types/index.js';
+
+const DIRECT_CHAT_STYLE = 45;
+
+function parseQueryInt(value: string | null, fallback: number): number {
+	const parsed = Number.parseInt(value ?? '', 10);
+	return Number.isNaN(parsed) ? fallback : parsed;
+}
+
+function getMergedParticipants(chatIds: Iterable<number>): Participant[] {
+	const participantMap = new Map<string, Participant>();
+	for (const chatId of chatIds) {
+		for (const participant of getChatParticipants(chatId)) {
+			const key = participant.handle_identifier.toLowerCase();
+			if (!participantMap.has(key)) {
+				participantMap.set(key, participant);
+			}
+		}
+	}
+	return Array.from(participantMap.values());
+}
+
+function resolveParticipantNames(participants: Participant[]): Map<string, string> {
+	const names = new Map<string, string>();
+	for (const participant of participants) {
+		const name = resolveContact(participant.handle_identifier);
+		names.set(participant.handle_identifier, name);
+		participant.display_name = name;
+	}
+	return names;
+}
 
 export const GET: RequestHandler = ({ params, url }) => {
-	const chatId = parseInt(params.chatId, 10);
-	if (isNaN(chatId)) return json({ error: 'Invalid chat ID' }, { status: 400 });
+	const chatId = Number.parseInt(params.chatId, 10);
+	if (Number.isNaN(chatId)) return json({ error: 'Invalid chat ID' }, { status: 400 });
 
-	const limit = parseInt(url.searchParams.get('limit') ?? '50', 10);
-	const offset = parseInt(url.searchParams.get('offset') ?? '0', 10);
+	const limit = parseQueryInt(url.searchParams.get('limit'), 50);
+	const offset = parseQueryInt(url.searchParams.get('offset'), 0);
 
 	const chat = getChatById(chatId);
 	if (!chat) return json({ error: 'Chat not found' }, { status: 404 });
@@ -27,7 +57,7 @@ export const GET: RequestHandler = ({ params, url }) => {
 	const mergedChatGuids = new Map<number, string>([[chatId, chat.guid]]);
 
 	// Merge direct chats that map to the same contact (multiple phone/email handles).
-	if (chat.style === 45 && participants.length === 1) {
+	if (chat.style === DIRECT_CHAT_STYLE && participants.length === 1) {
 		const baseIdentifier = participants[0].handle_identifier;
 		const relatedIdentifiers = getRelatedContactIdentifiers(baseIdentifier);
 		const relatedChats = findDirectChatsByHandleIdentifiers(relatedIdentifiers);
@@ -38,16 +68,7 @@ export const GET: RequestHandler = ({ params, url }) => {
 		}
 
 		if (relatedChats.length > 0) {
-			const participantMap = new Map<string, (typeof participants)[number]>();
-			for (const memberChatId of mergedChatIds) {
-				for (const p of getChatParticipants(memberChatId)) {
-					const key = p.handle_identifier.toLowerCase();
-					if (!participantMap.has(key)) {
-						participantMap.set(key, p);
-					}
-				}
-			}
-			participants = Array.from(participantMap.values());
+			participants = getMergedParticipants(mergedChatIds);
 		}
 	}
 
@@ -74,12 +95,7 @@ export const GET: RequestHandler = ({ params, url }) => {
 	}
 
 	// Resolve sender names
-	const handleMap = new Map<string, string>();
-	for (const p of participants) {
-		const name = resolveContact(p.handle_identifier);
-		handleMap.set(p.handle_identifier, name);
-		p.display_name = name;
-	}
+	const handleMap = resolveParticipantNames(participants);
 
 	for (const msg of messages) {
 		if (msg.is_from_me) {
@@ -107,6 +123,6 @@ export const GET: RequestHandler = ({ params, url }) => {
 		messages,
 		participants,
 		merged_chat_ids: chatIds,
-		merged_chat_guids: Array.from(new Set(Array.from(mergedChatGuids.values())))
+		merged_chat_guids: Array.from(new Set(mergedChatGuids.values()))
 	});
 };

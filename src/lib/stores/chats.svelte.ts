@@ -1,11 +1,55 @@
 import type { Chat, Message, Participant, Reaction } from '$lib/types/index.js';
 import { getCachedChats, cacheChats } from '$lib/db/client-db.js';
-import { isReactionRemoval, addVariantOf, reactionEmoji, parseAssociatedGuid } from '$lib/utils/reactions.js';
+import { addVariantOf, reactionEmoji } from '$lib/utils/reactions.js';
 
 let chats: Chat[] = $state([]);
 let source: 'cache' | 'server' | 'none' = $state('none');
 let messageMemoryCache: Map<number, Message[]> = $state(new Map());
 let participantCache: Map<number, Participant[]> = $state(new Map());
+
+function setMessages(chatId: number, messages: Message[]) {
+	const next = new Map(messageMemoryCache);
+	next.set(chatId, messages);
+	messageMemoryCache = next;
+}
+
+function setParticipantsForChat(chatId: number, participants: Participant[]) {
+	const next = new Map(participantCache);
+	next.set(chatId, participants);
+	participantCache = next;
+}
+
+function updateChatById(chatId: number, updater: (chat: Chat) => Chat | null) {
+	const index = chats.findIndex((chat) => chat.rowid === chatId);
+	if (index === -1) return;
+
+	const nextChat = updater(chats[index]);
+	if (!nextChat) return;
+
+	const nextChats = [...chats];
+	nextChats[index] = nextChat;
+	chats = nextChats;
+}
+
+function updateMessageByGuid(
+	chatId: number,
+	messageGuid: string,
+	updater: (message: Message) => Message | null
+): Message | null {
+	const existing = messageMemoryCache.get(chatId);
+	if (!existing) return null;
+
+	const index = existing.findIndex((message) => message.guid === messageGuid);
+	if (index === -1) return null;
+
+	const updated = updater(existing[index]);
+	if (!updated) return null;
+
+	const nextMessages = [...existing];
+	nextMessages[index] = updated;
+	setMessages(chatId, nextMessages);
+	return updated;
+}
 
 export function getChatStore() {
 	return {
@@ -72,40 +116,28 @@ export function updateChatLastMessage(chatId: number, message: Message) {
 
 export function incrementChatUnread(chatId: number, delta = 1) {
 	if (delta <= 0) return;
-	const idx = chats.findIndex((c) => c.rowid === chatId);
-	if (idx === -1) return;
-
-	const chat = chats[idx];
-	const next = [...chats];
-	next[idx] = { ...chat, unread_count: (chat.unread_count ?? 0) + delta };
-	chats = next;
+	updateChatById(chatId, (chat) => ({
+		...chat,
+		unread_count: (chat.unread_count ?? 0) + delta
+	}));
 }
 
 export function clearChatUnread(chatId: number) {
-	const idx = chats.findIndex((c) => c.rowid === chatId);
-	if (idx === -1) return;
-
-	const chat = chats[idx];
-	if ((chat.unread_count ?? 0) === 0) return;
-	const next = [...chats];
-	next[idx] = { ...chat, unread_count: 0 };
-	chats = next;
+	updateChatById(chatId, (chat) =>
+		(chat.unread_count ?? 0) === 0 ? null : { ...chat, unread_count: 0 }
+	);
 }
 
 /** Replace all messages for a chat */
 export function setChatMessages(chatId: number, messages: Message[]) {
-	const next = new Map(messageMemoryCache);
-	next.set(chatId, messages);
-	messageMemoryCache = next;
+	setMessages(chatId, messages);
 }
 
 /** Append messages to a chat, deduplicating by guid */
 export function appendMessage(chatId: number, message: Message) {
 	const existing = messageMemoryCache.get(chatId) ?? [];
 	if (existing.some((m) => m.guid === message.guid)) return;
-	const next = new Map(messageMemoryCache);
-	next.set(chatId, [...existing, message]);
-	messageMemoryCache = next;
+	setMessages(chatId, [...existing, message]);
 }
 
 /** Prepend older messages (for pagination) */
@@ -114,18 +146,14 @@ export function prependMessages(chatId: number, messages: Message[]) {
 	const existingGuids = new Set(existing.map((m) => m.guid));
 	const fresh = messages.filter((m) => !existingGuids.has(m.guid));
 	if (fresh.length === 0) return;
-	const next = new Map(messageMemoryCache);
-	next.set(chatId, [...fresh, ...existing]);
-	messageMemoryCache = next;
+	setMessages(chatId, [...fresh, ...existing]);
 }
 
 /** Remove a message by guid (e.g. optimistic message on failure) */
 export function removeMessage(chatId: number, guid: string) {
 	const existing = messageMemoryCache.get(chatId);
 	if (!existing) return;
-	const next = new Map(messageMemoryCache);
-	next.set(chatId, existing.filter((m) => m.guid !== guid));
-	messageMemoryCache = next;
+	setMessages(chatId, existing.filter((m) => m.guid !== guid));
 }
 
 /** Remove one optimistic temp message that matches a confirmed server message. */
@@ -147,11 +175,9 @@ export function removeMatchingOptimisticMessage(chatId: number, message: Message
 	});
 	if (idx === -1) return;
 
-	const next = new Map(messageMemoryCache);
 	const updated = [...existing];
 	updated.splice(idx, 1);
-	next.set(chatId, updated);
-	messageMemoryCache = next;
+	setMessages(chatId, updated);
 }
 
 /** Incrementally update reactions on a specific message */
@@ -161,61 +187,37 @@ export function updateMessageReactions(
 	reaction: Reaction,
 	isRemoval: boolean
 ) {
-	const existing = messageMemoryCache.get(chatId);
-	if (!existing) return;
+	updateMessageByGuid(chatId, messageGuid, (message) => {
+		const reactions = [...(message.reactions ?? [])];
+		const addType = isRemoval
+			? addVariantOf(reaction.associated_message_type)
+			: reaction.associated_message_type;
+		const key = `${reaction.is_from_me ? 'me' : reaction.handle_id}:${addType}`;
 
-	const msgIdx = existing.findIndex((m) => m.guid === messageGuid);
-	if (msgIdx === -1) return;
+		if (isRemoval) {
+			const removeIdx = reactions.findIndex(
+				(r) =>
+					`${r.is_from_me ? 'me' : r.handle_id}:${r.associated_message_type}` === key
+			);
+			if (removeIdx !== -1) reactions.splice(removeIdx, 1);
+		} else {
+			const emoji = reaction.emoji || reactionEmoji(reaction.associated_message_type) || '';
+			reactions.push({ ...reaction, emoji });
+		}
 
-	const msg = existing[msgIdx];
-	const reactions = [...(msg.reactions ?? [])];
-	const addType = isRemoval
-		? addVariantOf(reaction.associated_message_type)
-		: reaction.associated_message_type;
-	const key = `${reaction.is_from_me ? 'me' : reaction.handle_id}:${addType}`;
-
-	if (isRemoval) {
-		const removeIdx = reactions.findIndex(
-			(r) =>
-				`${r.is_from_me ? 'me' : r.handle_id}:${r.associated_message_type}` === key
-		);
-		if (removeIdx !== -1) reactions.splice(removeIdx, 1);
-	} else {
-		const emoji = reaction.emoji || reactionEmoji(reaction.associated_message_type) || '';
-		reactions.push({ ...reaction, emoji });
-	}
-
-	const updatedMsg = { ...msg, reactions };
-	const updatedMessages = [...existing];
-	updatedMessages[msgIdx] = updatedMsg;
-
-	const next = new Map(messageMemoryCache);
-	next.set(chatId, updatedMessages);
-	messageMemoryCache = next;
+		return { ...message, reactions };
+	});
 }
 
 /** Update message body text locally (used for edits). */
 export function updateMessageBody(chatId: number, messageGuid: string, body: string, editedAt = Date.now()) {
-	const existing = messageMemoryCache.get(chatId);
-	if (!existing) return;
-
-	const msgIdx = existing.findIndex((m) => m.guid === messageGuid);
-	if (msgIdx === -1) return;
-
-	const msg = existing[msgIdx];
-	const updatedMsg: Message = {
-		...msg,
+	const updatedMsg = updateMessageByGuid(chatId, messageGuid, (message) => ({
+		...message,
 		text: body,
 		body,
 		date_edited: editedAt
-	};
-
-	const updatedMessages = [...existing];
-	updatedMessages[msgIdx] = updatedMsg;
-
-	const next = new Map(messageMemoryCache);
-	next.set(chatId, updatedMessages);
-	messageMemoryCache = next;
+	}));
+	if (!updatedMsg) return;
 
 	const chat = chats.find((c) => c.rowid === chatId);
 	if (chat?.last_message?.guid === messageGuid) {
@@ -225,26 +227,13 @@ export function updateMessageBody(chatId: number, messageGuid: string, body: str
 
 /** Mark message as unsent/retracted locally. */
 export function markMessageRetracted(chatId: number, messageGuid: string, retractedAt = Date.now()) {
-	const existing = messageMemoryCache.get(chatId);
-	if (!existing) return;
-
-	const msgIdx = existing.findIndex((m) => m.guid === messageGuid);
-	if (msgIdx === -1) return;
-
-	const msg = existing[msgIdx];
-	const updatedMsg: Message = {
-		...msg,
+	const updatedMsg = updateMessageByGuid(chatId, messageGuid, (message) => ({
+		...message,
 		date_retracted: retractedAt,
 		text: '',
 		body: ''
-	};
-
-	const updatedMessages = [...existing];
-	updatedMessages[msgIdx] = updatedMsg;
-
-	const next = new Map(messageMemoryCache);
-	next.set(chatId, updatedMessages);
-	messageMemoryCache = next;
+	}));
+	if (!updatedMsg) return;
 
 	const chat = chats.find((c) => c.rowid === chatId);
 	if (chat?.last_message?.guid === messageGuid) {
@@ -254,7 +243,5 @@ export function markMessageRetracted(chatId: number, messageGuid: string, retrac
 
 /** Set participants for a chat */
 export function setParticipants(chatId: number, participants: Participant[]) {
-	const next = new Map(participantCache);
-	next.set(chatId, participants);
-	participantCache = next;
+	setParticipantsForChat(chatId, participants);
 }

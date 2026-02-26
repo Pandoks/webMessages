@@ -14,6 +14,19 @@ let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 const messageListeners = new Set<(events: NewMessageEvent[]) => void>();
 const contactsReadyListeners = new Set<() => void>();
 
+function clearTimer(timer: ReturnType<typeof setTimeout> | null): null {
+	if (timer) clearTimeout(timer);
+	return null;
+}
+
+function notify<T>(listeners: Set<(payload: T) => void>, payload: T) {
+	for (const listener of listeners) listener(payload);
+}
+
+function notifyVoid(listeners: Set<() => void>) {
+	for (const listener of listeners) listener();
+}
+
 export function onNewMessages(callback: (events: NewMessageEvent[]) => void) {
 	messageListeners.add(callback);
 	return () => messageListeners.delete(callback);
@@ -43,24 +56,17 @@ export function connect() {
 	eventSource.addEventListener('connected', () => {
 		connected = true;
 		isOffline = false;
-		if (offlineTimer) {
-			clearTimeout(offlineTimer);
-			offlineTimer = null;
-		}
+		offlineTimer = clearTimer(offlineTimer);
 		console.log('SSE connected');
 	});
 
 	eventSource.addEventListener('new_messages', (event) => {
 		const data: NewMessageEvent[] = JSON.parse(event.data);
-		for (const listener of messageListeners) {
-			listener(data);
-		}
+		notify(messageListeners, data);
 	});
 
 	eventSource.addEventListener('contacts_ready', () => {
-		for (const listener of contactsReadyListeners) {
-			listener();
-		}
+		notifyVoid(contactsReadyListeners);
 	});
 
 	eventSource.onerror = () => {
@@ -79,14 +85,8 @@ export function connect() {
 }
 
 export function disconnect() {
-	if (reconnectTimer) {
-		clearTimeout(reconnectTimer);
-		reconnectTimer = null;
-	}
-	if (offlineTimer) {
-		clearTimeout(offlineTimer);
-		offlineTimer = null;
-	}
+	reconnectTimer = clearTimer(reconnectTimer);
+	offlineTimer = clearTimer(offlineTimer);
 	if (eventSource) {
 		eventSource.close();
 		eventSource = null;

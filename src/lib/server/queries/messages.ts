@@ -34,6 +34,8 @@ interface MessageRow {
 	chat_guid?: string;
 }
 
+type DbStmt = ReturnType<ReturnType<typeof getDb>['prepare']>;
+
 const MESSAGE_COLUMNS = `
 	m.ROWID as rowid,
 	m.guid,
@@ -64,29 +66,32 @@ const MESSAGE_COLUMNS = `
 `;
 
 // Cached prepared statements
-let _messagesByChatStmt: ReturnType<ReturnType<typeof getDb>['prepare']> | null = null;
-let _messageByGuidStmt: ReturnType<ReturnType<typeof getDb>['prepare']> | null = null;
-let _newMessagesStmt: ReturnType<ReturnType<typeof getDb>['prepare']> | null = null;
-let _maxRowIdStmt: ReturnType<ReturnType<typeof getDb>['prepare']> | null = null;
+const messagesByChatsStmtCache = new Map<number, DbStmt>();
+let _messageByGuidStmt: DbStmt | null = null;
+let _newMessagesStmt: DbStmt | null = null;
+let _maxRowIdStmt: DbStmt | null = null;
 
-function messagesByChatStmt() {
-	if (!_messagesByChatStmt) {
-		_messagesByChatStmt = getDb().prepare(`
-			SELECT ${MESSAGE_COLUMNS},
-				cmj.chat_id as chat_id,
-				c.guid as chat_guid
-			FROM message m
-			JOIN chat_message_join cmj ON m.ROWID = cmj.message_id
-			JOIN chat c ON c.ROWID = cmj.chat_id
-			LEFT JOIN handle h ON m.handle_id = h.ROWID
-			WHERE cmj.chat_id = ?
-				AND m.associated_message_type = 0
-				AND NOT (m.item_type != 0 AND m.group_action_type = 0 AND m.group_title IS NULL)
-			ORDER BY m.date DESC
-			LIMIT ? OFFSET ?
-		`);
-	}
-	return _messagesByChatStmt;
+function messagesByChatsStmt(chatCount: number): DbStmt {
+	const cached = messagesByChatsStmtCache.get(chatCount);
+	if (cached) return cached;
+
+	const placeholders = Array.from({ length: chatCount }, () => '?').join(',');
+	const stmt = getDb().prepare(`
+		SELECT ${MESSAGE_COLUMNS},
+			cmj.chat_id as chat_id,
+			c.guid as chat_guid
+		FROM message m
+		JOIN chat_message_join cmj ON m.ROWID = cmj.message_id
+		JOIN chat c ON c.ROWID = cmj.chat_id
+		LEFT JOIN handle h ON m.handle_id = h.ROWID
+		WHERE cmj.chat_id IN (${placeholders})
+			AND m.associated_message_type = 0
+			AND NOT (m.item_type != 0 AND m.group_action_type = 0 AND m.group_title IS NULL)
+		ORDER BY m.date DESC
+		LIMIT ? OFFSET ?
+	`);
+	messagesByChatsStmtCache.set(chatCount, stmt);
+	return stmt;
 }
 
 function messageByGuidStmt() {
@@ -135,31 +140,10 @@ export function getMessagesByChat(
 
 export function getMessagesByChats(chatIds: number[], limit = 50, offset = 0): Message[] {
 	if (chatIds.length === 0) return [];
-	if (chatIds.length === 1) {
-		const rows = messagesByChatStmt().all(chatIds[0], limit, offset) as MessageRow[];
-		return rows
-			.map((row) => rowToMessage(row, row.chat_id ?? chatIds[0], row.chat_guid ?? undefined))
-			.reverse();
-	}
-
-	const placeholders = chatIds.map(() => '?').join(',');
-	const stmt = getDb().prepare(`
-		SELECT ${MESSAGE_COLUMNS},
-			cmj.chat_id as chat_id,
-			c.guid as chat_guid
-		FROM message m
-		JOIN chat_message_join cmj ON m.ROWID = cmj.message_id
-		JOIN chat c ON c.ROWID = cmj.chat_id
-		LEFT JOIN handle h ON m.handle_id = h.ROWID
-		WHERE cmj.chat_id IN (${placeholders})
-			AND m.associated_message_type = 0
-			AND NOT (m.item_type != 0 AND m.group_action_type = 0 AND m.group_title IS NULL)
-		ORDER BY m.date DESC
-		LIMIT ? OFFSET ?
-	`);
-	const rows = stmt.all(...chatIds, limit, offset) as MessageRow[];
+	const fallbackChatId = chatIds[0];
+	const rows = messagesByChatsStmt(chatIds.length).all(...chatIds, limit, offset) as MessageRow[];
 	return rows
-		.map((row) => rowToMessage(row, row.chat_id ?? chatIds[0], row.chat_guid ?? undefined))
+		.map((row) => rowToMessage(row, row.chat_id ?? fallbackChatId, row.chat_guid ?? undefined))
 		.reverse();
 }
 

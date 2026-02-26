@@ -1,10 +1,43 @@
 import { json, type RequestHandler } from '@sveltejs/kit';
 import { debugUnsend, sendUnsend } from '$lib/server/imcore.js';
 import { getMessageByGuid } from '$lib/server/queries/messages.js';
+import { errorMessage, pollUntil, trimmedString } from '$lib/server/route-utils.js';
+
+const VERIFY_TIMEOUT_MS = 7000;
+const POLL_INTERVAL_MS = 250;
+
+async function waitForRetraction(messageGuid: string): Promise<boolean> {
+	return pollUntil(() => {
+		const message = getMessageByGuid(messageGuid);
+		return !!(message?.date_retracted && message.date_retracted > 0);
+	}, VERIFY_TIMEOUT_MS, POLL_INTERVAL_MS);
+}
+
+async function logDebugUnsend(chatGuid: string, messageGuid: string): Promise<void> {
+	try {
+		const debug = await debugUnsend(chatGuid, messageGuid);
+		console.warn(
+			`[unsend] debug no-effect ${messageGuid}: ${JSON.stringify({
+				chatClass: debug.chatClass,
+				itemClass: debug.itemClass,
+				msgClass: debug.msgClass,
+				partClass: debug.partClass,
+				resolvedPartClass: debug.resolvedPartClass,
+				existingPartClass: debug.existingPartClass,
+				descriptorPartClass: debug.descriptorPartClass,
+				candidatePartClasses: debug.candidatePartClasses,
+				retractAllowed: debug.retractAllowed
+			})}`
+		);
+	} catch (debugErr) {
+		console.warn(`[unsend] debug_unsend failed for ${messageGuid}:`, debugErr);
+	}
+}
 
 export const POST: RequestHandler = async ({ request }) => {
 	const body = await request.json();
-	const { chatGuid, messageGuid } = body;
+	const chatGuid = trimmedString(body.chatGuid);
+	const messageGuid = trimmedString(body.messageGuid);
 
 	if (!chatGuid || !messageGuid) {
 		return json({ error: 'chatGuid and messageGuid are required' }, { status: 400 });
@@ -25,36 +58,10 @@ export const POST: RequestHandler = async ({ request }) => {
 		await sendUnsend(chatGuid, messageGuid);
 
 		// Verify unsend actually materialized in the DB (can no-op on unsupported messages).
-		const deadline = Date.now() + 7000;
-		let verified = false;
-		while (Date.now() < deadline) {
-			const msg = getMessageByGuid(messageGuid);
-			if (msg?.date_retracted && msg.date_retracted > 0) {
-				verified = true;
-				break;
-			}
-			await new Promise((resolve) => setTimeout(resolve, 250));
-		}
+		const verified = await waitForRetraction(messageGuid);
 
 		if (!verified) {
-			try {
-				const debug = await debugUnsend(chatGuid, messageGuid);
-				console.warn(
-					`[unsend] debug no-effect ${messageGuid}: ${JSON.stringify({
-						chatClass: debug.chatClass,
-						itemClass: debug.itemClass,
-						msgClass: debug.msgClass,
-						partClass: debug.partClass,
-						resolvedPartClass: debug.resolvedPartClass,
-						existingPartClass: debug.existingPartClass,
-						descriptorPartClass: debug.descriptorPartClass,
-						candidatePartClasses: debug.candidatePartClasses,
-						retractAllowed: debug.retractAllowed
-					})}`
-				);
-			} catch (debugErr) {
-				console.warn(`[unsend] debug_unsend failed for ${messageGuid}:`, debugErr);
-			}
+			await logDebugUnsend(chatGuid, messageGuid);
 			console.warn(`[unsend] no retraction observed for ${messageGuid}`);
 			return json(
 				{
@@ -68,7 +75,7 @@ export const POST: RequestHandler = async ({ request }) => {
 		console.log(`[unsend] verified retraction for ${messageGuid}`);
 		return json({ success: true });
 	} catch (err) {
-		const message = err instanceof Error ? err.message : 'Failed to unsend message';
+		const message = errorMessage(err, 'Failed to unsend message');
 		const noEffect =
 			message.includes('No unsend effect') ||
 			message.includes('no retraction observed') ||

@@ -35,11 +35,13 @@ interface DirectChatRow {
 	handle_identifier: string;
 }
 
+type DbStmt = ReturnType<ReturnType<typeof getDb>['prepare']>;
+
 // Cache prepared statements (created once, reused)
-let _chatListStmt: ReturnType<ReturnType<typeof getDb>['prepare']> | null = null;
-let _chatParticipantsStmt: ReturnType<ReturnType<typeof getDb>['prepare']> | null = null;
-let _chatByIdStmt: ReturnType<ReturnType<typeof getDb>['prepare']> | null = null;
-let _directChatsByHandleStmt: ReturnType<ReturnType<typeof getDb>['prepare']> | null = null;
+let _chatListStmt: DbStmt | null = null;
+let _chatParticipantsStmt: DbStmt | null = null;
+let _chatByIdStmt: DbStmt | null = null;
+let _directChatsByHandleStmt: DbStmt | null = null;
 
 const UNREAD_COUNT_SQL = `
 	(
@@ -149,7 +151,7 @@ function chatByIdStmt() {
 
 function directChatsByHandleStmt() {
 	if (!_directChatsByHandleStmt) {
-		_directChatsByHandleStmt = getDb().prepare<[string], DirectChatRow>(`
+		_directChatsByHandleStmt = getDb().prepare<[string, string], DirectChatRow>(`
 			SELECT
 				c.ROWID as rowid,
 				c.guid as guid,
@@ -168,6 +170,10 @@ function directChatsByHandleStmt() {
 	return _directChatsByHandleStmt;
 }
 
+function directChatsByHandle(identifier: string): DirectChatRow[] {
+	return directChatsByHandleStmt().all(identifier, identifier) as DirectChatRow[];
+}
+
 function sameHandleIdentifier(a: string, b: string): boolean {
 	const left = a.trim();
 	const right = b.trim();
@@ -180,12 +186,12 @@ function sameHandleIdentifier(a: string, b: string): boolean {
 }
 
 export function getChatList(): Chat[] {
-	const rows = (chatListStmt() as ReturnType<ReturnType<typeof getDb>['prepare']>).all() as ChatRow[];
+	const rows = chatListStmt().all() as ChatRow[];
 	return rows.map(rowToChat);
 }
 
 export function getChatParticipants(chatId: number): Participant[] {
-	const rows = (chatParticipantsStmt() as ReturnType<ReturnType<typeof getDb>['prepare']>).all(chatId) as HandleRow[];
+	const rows = chatParticipantsStmt().all(chatId) as HandleRow[];
 	return rows.map((r) => ({
 		handle_id: r.handle_id,
 		handle_identifier: r.handle_identifier,
@@ -195,7 +201,7 @@ export function getChatParticipants(chatId: number): Participant[] {
 }
 
 export function getChatById(chatId: number): Chat | null {
-	const row = (chatByIdStmt() as ReturnType<ReturnType<typeof getDb>['prepare']>).get(chatId) as ChatRow | undefined;
+	const row = chatByIdStmt().get(chatId) as ChatRow | undefined;
 	if (!row) return null;
 	return rowToChat(row);
 }
@@ -206,7 +212,7 @@ export function findDirectChatByHandleIdentifier(
 	const needle = identifier.trim();
 	if (!needle) return null;
 
-	const rows = directChatsByHandleStmt().all(needle, needle) as DirectChatRow[];
+	const rows = directChatsByHandle(needle);
 	if (rows.length === 0) return null;
 
 	const lowerNeedle = needle.toLowerCase();
@@ -261,7 +267,7 @@ export function findDirectChatsByHandleIdentifiers(
 		}
 
 		for (const candidate of candidates) {
-			const rows = directChatsByHandleStmt().all(candidate, candidate) as DirectChatRow[];
+			const rows = directChatsByHandle(candidate);
 			for (const row of rows) {
 				if (!sameHandleIdentifier(row.handle_identifier, candidate)) continue;
 				if (seen.has(row.rowid)) continue;

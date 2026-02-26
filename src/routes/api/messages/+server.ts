@@ -3,6 +3,7 @@ import type { RequestHandler } from './$types';
 import { sendMessage, sendMessageToHandle } from '$lib/server/send.js';
 import { findLatestDirectChatByHandleIdentifiers } from '$lib/server/queries/chats.js';
 import { findContactGroupMatches, getRelatedContactIdentifiers } from '$lib/server/contacts.js';
+import { trimmedString } from '$lib/server/route-utils.js';
 import { isPhoneNumber } from '$lib/utils/phone.js';
 
 function looksLikeHandle(input: string): boolean {
@@ -11,9 +12,10 @@ function looksLikeHandle(input: string): boolean {
 
 export const POST: RequestHandler = async ({ request }) => {
 	const body = await request.json();
-	const { chatGuid, handle, text, service } = body;
-	const trimmedText = typeof text === 'string' ? text.trim() : '';
-	const rawHandle = typeof handle === 'string' ? handle.trim() : '';
+	const chatGuid = trimmedString(body.chatGuid);
+	const rawHandle = trimmedString(body.handle);
+	const trimmedText = trimmedString(body.text);
+	const service = body.service;
 
 	try {
 		if (chatGuid) {
