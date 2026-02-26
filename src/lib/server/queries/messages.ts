@@ -4,36 +4,36 @@ import { getMessageText } from '../attributed-body.js';
 import type { Message } from '$lib/types/index.js';
 
 interface MessageRow {
-	rowid: number;
-	guid: string;
-	text: string | null;
-	attributedBody: Buffer | null;
-	handle_id: number;
-	service: string;
-	is_from_me: number;
-	date: number;
-	date_read: number;
-	date_delivered: number;
-	date_retracted: number;
-	date_edited: number;
-	schedule_type: number;
-	schedule_state: number;
-	is_delivered: number;
-	is_sent: number;
-	is_read: number;
-	cache_has_attachments: number;
-	associated_message_type: number;
-	associated_message_guid: string | null;
-	associated_message_emoji: string | null;
-	thread_originator_guid: string | null;
-	thread_originator_part: string | null;
-	group_title: string | null;
-	group_action_type: number;
-	item_type: number;
-	other_handle: number;
-	handle_identifier: string | null;
-	chat_id?: number;
-	chat_guid?: string;
+  rowid: number;
+  guid: string;
+  text: string | null;
+  attributedBody: Buffer | null;
+  handle_id: number;
+  service: string;
+  is_from_me: number;
+  date: number;
+  date_read: number;
+  date_delivered: number;
+  date_retracted: number;
+  date_edited: number;
+  schedule_type: number;
+  schedule_state: number;
+  is_delivered: number;
+  is_sent: number;
+  is_read: number;
+  cache_has_attachments: number;
+  associated_message_type: number;
+  associated_message_guid: string | null;
+  associated_message_emoji: string | null;
+  thread_originator_guid: string | null;
+  thread_originator_part: string | null;
+  group_title: string | null;
+  group_action_type: number;
+  item_type: number;
+  other_handle: number;
+  handle_identifier: string | null;
+  chat_id?: number;
+  chat_guid?: string;
 }
 
 type DbStmt = ReturnType<ReturnType<typeof getDb>['prepare']>;
@@ -76,11 +76,11 @@ let _newMessagesStmt: DbStmt | null = null;
 let _maxRowIdStmt: DbStmt | null = null;
 
 function messagesByChatsStmt(chatCount: number): DbStmt {
-	const cached = messagesByChatsStmtCache.get(chatCount);
-	if (cached) return cached;
+  const cached = messagesByChatsStmtCache.get(chatCount);
+  if (cached) return cached;
 
-	const placeholders = Array.from({ length: chatCount }, () => '?').join(',');
-	const stmt = getDb().prepare(`
+  const placeholders = Array.from({ length: chatCount }, () => '?').join(',');
+  const stmt = getDb().prepare(`
 		SELECT ${MESSAGE_COLUMNS},
 			cmj.chat_id as chat_id,
 			c.guid as chat_guid
@@ -94,25 +94,25 @@ function messagesByChatsStmt(chatCount: number): DbStmt {
 		ORDER BY m.date DESC
 		LIMIT ? OFFSET ?
 	`);
-	messagesByChatsStmtCache.set(chatCount, stmt);
-	return stmt;
+  messagesByChatsStmtCache.set(chatCount, stmt);
+  return stmt;
 }
 
 function messageByGuidStmt() {
-	if (!_messageByGuidStmt) {
-		_messageByGuidStmt = getDb().prepare(`
+  if (!_messageByGuidStmt) {
+    _messageByGuidStmt = getDb().prepare(`
 			SELECT ${MESSAGE_COLUMNS}
 			FROM message m
 			LEFT JOIN handle h ON m.handle_id = h.ROWID
 			WHERE m.guid = ?
 		`);
-	}
-	return _messageByGuidStmt;
+  }
+  return _messageByGuidStmt;
 }
 
 function newMessagesStmt() {
-	if (!_newMessagesStmt) {
-		_newMessagesStmt = getDb().prepare(`
+  if (!_newMessagesStmt) {
+    _newMessagesStmt = getDb().prepare(`
 			SELECT ${MESSAGE_COLUMNS},
 				cmj.chat_id,
 				c.guid as chat_guid
@@ -123,96 +123,92 @@ function newMessagesStmt() {
 			WHERE m.ROWID > ?
 			ORDER BY m.ROWID ASC
 		`);
-	}
-	return _newMessagesStmt;
+  }
+  return _newMessagesStmt;
 }
 
 function maxRowIdStmt() {
-	if (!_maxRowIdStmt) {
-		_maxRowIdStmt = getDb().prepare('SELECT MAX(ROWID) as max_id FROM message');
-	}
-	return _maxRowIdStmt;
+  if (!_maxRowIdStmt) {
+    _maxRowIdStmt = getDb().prepare('SELECT MAX(ROWID) as max_id FROM message');
+  }
+  return _maxRowIdStmt;
 }
 
-export function getMessagesByChat(
-	chatId: number,
-	limit = 50,
-	offset = 0
-): Message[] {
-	return getMessagesByChats([chatId], limit, offset);
+export function getMessagesByChat(chatId: number, limit = 50, offset = 0): Message[] {
+  return getMessagesByChats([chatId], limit, offset);
 }
 
 export function getMessagesByChats(chatIds: number[], limit = 50, offset = 0): Message[] {
-	if (chatIds.length === 0) return [];
-	const fallbackChatId = chatIds[0];
-	const rows = messagesByChatsStmt(chatIds.length).all(...chatIds, limit, offset) as MessageRow[];
-	return rows
-		.map((row) => rowToMessage(row, row.chat_id ?? fallbackChatId, row.chat_guid ?? undefined))
-		.reverse();
+  if (chatIds.length === 0) return [];
+  const fallbackChatId = chatIds[0];
+  const rows = messagesByChatsStmt(chatIds.length).all(...chatIds, limit, offset) as MessageRow[];
+  return rows
+    .map((row) => rowToMessage(row, row.chat_id ?? fallbackChatId, row.chat_guid ?? undefined))
+    .reverse();
 }
 
 export function getMessageByGuid(guid: string): Message | null {
-	const row = messageByGuidStmt().get(guid) as MessageRow | undefined;
-	if (!row) return null;
-	return rowToMessage(row, 0);
+  const row = messageByGuidStmt().get(guid) as MessageRow | undefined;
+  if (!row) return null;
+  return rowToMessage(row, 0);
 }
 
 export function getNewMessages(sinceRowId: number): { chatId: number; message: Message }[] {
-	const rows = newMessagesStmt().all(sinceRowId) as (MessageRow & { chat_id: number })[];
+  const rows = newMessagesStmt().all(sinceRowId) as (MessageRow & { chat_id: number })[];
 
-	return rows.map((row) => ({
-		chatId: row.chat_id,
-		message: rowToMessage(row, row.chat_id, row.chat_guid ?? undefined)
-	}));
+  return rows.map((row) => ({
+    chatId: row.chat_id,
+    message: rowToMessage(row, row.chat_id, row.chat_guid ?? undefined)
+  }));
 }
 
 export function getMaxMessageRowId(): number {
-	const row = maxRowIdStmt().get() as { max_id: number } | undefined;
-	return row?.max_id ?? 0;
+  const row = maxRowIdStmt().get() as { max_id: number } | undefined;
+  return row?.max_id ?? 0;
 }
 
 function rowToMessage(row: MessageRow, chatId: number, chatGuid?: string): Message {
-	const body = getMessageText(row.text, row.attributedBody);
-	const syntheticRetracted =
-		row.date_retracted === 0 &&
-		row.date_edited > 0 &&
-		row.associated_message_type === 0 &&
-		row.is_from_me === 1 &&
-		row.service === 'iMessage' &&
-		body.trim().length === 0;
-	const effectiveDateRetracted = row.date_retracted || (syntheticRetracted ? row.date_edited : 0);
-	const effectiveDateEdited = syntheticRetracted ? 0 : row.date_edited;
+  const body = getMessageText(row.text, row.attributedBody);
+  const syntheticRetracted =
+    row.date_retracted === 0 &&
+    row.date_edited > 0 &&
+    row.associated_message_type === 0 &&
+    row.is_from_me === 1 &&
+    row.service === 'iMessage' &&
+    body.trim().length === 0;
+  const effectiveDateRetracted = row.date_retracted || (syntheticRetracted ? row.date_edited : 0);
+  const effectiveDateEdited = syntheticRetracted ? 0 : row.date_edited;
 
-	return {
-		rowid: row.rowid,
-		guid: row.guid,
-		text: row.text,
-		handle_id: row.handle_id,
-		service: row.service,
-		is_from_me: row.is_from_me === 1,
-		date: appleToUnixMs(row.date),
-		date_read: row.date_read ? appleToUnixMs(row.date_read) : null,
-		date_delivered: row.date_delivered ? appleToUnixMs(row.date_delivered) : null,
-		date_retracted: effectiveDateRetracted ? appleToUnixMs(effectiveDateRetracted) : null,
-		date_edited: effectiveDateEdited ? appleToUnixMs(effectiveDateEdited) : null,
-		schedule_type: row.schedule_type,
-		schedule_state: row.schedule_state,
-		is_delivered: row.is_delivered === 1,
-		is_sent: row.is_sent === 1,
-		is_read: row.is_read === 1,
-		cache_has_attachments: row.cache_has_attachments === 1,
-		associated_message_type: row.associated_message_type,
-		associated_message_guid: row.associated_message_guid,
-		associated_message_emoji: row.associated_message_emoji,
-		thread_originator_guid: row.thread_originator_guid,
-		thread_originator_part: row.thread_originator_part,
-		group_title: row.group_title,
-		group_action_type: row.group_action_type,
-		item_type: row.item_type,
-		other_handle: row.other_handle,
-		chat_id: chatId,
-		chat_guid: chatGuid,
-		sender: row.handle_identifier ?? undefined,
-		body
-	};
+  return {
+    rowid: row.rowid,
+    guid: row.guid,
+    text: row.text,
+    handle_id: row.handle_id,
+    service: row.service,
+    is_from_me: row.is_from_me === 1,
+    date: appleToUnixMs(row.date),
+    date_read: row.date_read ? appleToUnixMs(row.date_read) : null,
+    date_delivered: row.date_delivered ? appleToUnixMs(row.date_delivered) : null,
+    date_retracted: effectiveDateRetracted ? appleToUnixMs(effectiveDateRetracted) : null,
+    date_edited: effectiveDateEdited ? appleToUnixMs(effectiveDateEdited) : null,
+    schedule_type: row.schedule_type,
+    schedule_state: row.schedule_state,
+    is_delivered: row.is_delivered === 1,
+    is_sent: row.is_sent === 1,
+    is_read: row.is_read === 1,
+    cache_has_attachments: row.cache_has_attachments === 1,
+    associated_message_type: row.associated_message_type,
+    associated_message_guid: row.associated_message_guid,
+    associated_message_emoji: row.associated_message_emoji,
+    thread_originator_guid: row.thread_originator_guid,
+    thread_originator_part: row.thread_originator_part,
+    group_title: row.group_title,
+    group_action_type: row.group_action_type,
+    item_type: row.item_type,
+    other_handle: row.other_handle,
+    chat_id: chatId,
+    chat_guid: chatGuid,
+    sender: row.handle_identifier ?? undefined,
+    body
+  };
 }

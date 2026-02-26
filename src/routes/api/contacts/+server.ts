@@ -3,5 +3,5 @@ import type { RequestHandler } from './$types';
 import { getAllContacts } from '$lib/server/contacts.js';
 
 export const GET: RequestHandler = () => {
-	return json({ contacts: getAllContacts() });
+  return json({ contacts: getAllContacts() });
 };

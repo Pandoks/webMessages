@@ -27,10 +27,7 @@ const HOME_DIR = process.env.HOME ?? '';
 const PHOTO_CACHE_ROOT = join(HOME_DIR, '.cache/webMessages');
 const PHOTO_CACHE_DIR = join(PHOTO_CACHE_ROOT, 'contact-photos');
 const PHOTO_EXPORTER_BIN_DIR = join(PHOTO_CACHE_ROOT, 'bin');
-const NICKNAME_CACHE_DIR = join(
-	HOME_DIR,
-	'Library/Messages/NickNameCache'
-);
+const NICKNAME_CACHE_DIR = join(HOME_DIR, 'Library/Messages/NickNameCache');
 
 // Photo exporter source lives in native/, binary is cached outside the repo.
 const PHOTO_EXPORTER_SOURCE = join(process.cwd(), 'native/export-photos.swift');
@@ -75,193 +72,195 @@ end tell
 `;
 
 function contactMapsEqual(a: Map<string, string>, b: Map<string, string>): boolean {
-	if (a.size !== b.size) return false;
-	for (const [key, value] of a) {
-		if (b.get(key) !== value) return false;
-	}
-	return true;
+  if (a.size !== b.size) return false;
+  for (const [key, value] of a) {
+    if (b.get(key) !== value) return false;
+  }
+  return true;
 }
 
 function photoMapsEqual(
-	a: Map<string, { path: string; mime: string }>,
-	b: Map<string, { path: string; mime: string }>
+  a: Map<string, { path: string; mime: string }>,
+  b: Map<string, { path: string; mime: string }>
 ): boolean {
-	if (a.size !== b.size) return false;
-	for (const [key, value] of a) {
-		const other = b.get(key);
-		if (!other) return false;
-		if (other.path !== value.path || other.mime !== value.mime) return false;
-	}
-	return true;
+  if (a.size !== b.size) return false;
+  for (const [key, value] of a) {
+    const other = b.get(key);
+    if (!other) return false;
+    if (other.path !== value.path || other.mime !== value.mime) return false;
+  }
+  return true;
 }
 
 async function broadcastContactsReady(): Promise<void> {
-	const { broadcast } = await import('./watcher.js');
-	broadcast({ type: 'contacts_ready', data: {} });
+  const { broadcast } = await import('./watcher.js');
+  broadcast({ type: 'contacts_ready', data: {} });
 }
 
 function ensurePhotoExporterBuilt(): boolean {
-	if (!existsSync(PHOTO_EXPORTER_SOURCE)) return false;
-	mkdirSync(PHOTO_EXPORTER_BIN_DIR, { recursive: true });
+  if (!existsSync(PHOTO_EXPORTER_SOURCE)) return false;
+  mkdirSync(PHOTO_EXPORTER_BIN_DIR, { recursive: true });
 
-	let needsBuild = !existsSync(PHOTO_EXPORTER);
-	if (!needsBuild) {
-		try {
-			const sourceMtime = statSync(PHOTO_EXPORTER_SOURCE).mtimeMs;
-			const binaryMtime = statSync(PHOTO_EXPORTER).mtimeMs;
-			needsBuild = sourceMtime > binaryMtime;
-		} catch {
-			needsBuild = true;
-		}
-	}
+  let needsBuild = !existsSync(PHOTO_EXPORTER);
+  if (!needsBuild) {
+    try {
+      const sourceMtime = statSync(PHOTO_EXPORTER_SOURCE).mtimeMs;
+      const binaryMtime = statSync(PHOTO_EXPORTER).mtimeMs;
+      needsBuild = sourceMtime > binaryMtime;
+    } catch {
+      needsBuild = true;
+    }
+  }
 
-	if (!needsBuild) return true;
+  if (!needsBuild) return true;
 
-	try {
-		execFileSync('swiftc', [PHOTO_EXPORTER_SOURCE, '-o', PHOTO_EXPORTER], {
-			timeout: 60000
-		});
-		return true;
-	} catch (err) {
-		console.error('Failed to compile export-photos helper:', err);
-		return existsSync(PHOTO_EXPORTER);
-	}
+  try {
+    execFileSync('swiftc', [PHOTO_EXPORTER_SOURCE, '-o', PHOTO_EXPORTER], {
+      timeout: 60000
+    });
+    return true;
+  } catch (err) {
+    console.error('Failed to compile export-photos helper:', err);
+    return existsSync(PHOTO_EXPORTER);
+  }
 }
 
 export async function loadContacts(force = false): Promise<boolean> {
-	if (!force && loaded) return true;
-	if (loading) return loading;
+  if (!force && loaded) return true;
+  if (loading) return loading;
 
-	loading = (async () => {
-		try {
-			const { stdout } = await execFileAsync('osascript', ['-e', APPLESCRIPT], {
-				timeout: 120000,
-				maxBuffer: 10 * 1024 * 1024
-			});
+  loading = (async () => {
+    try {
+      const { stdout } = await execFileAsync('osascript', ['-e', APPLESCRIPT], {
+        timeout: 120000,
+        maxBuffer: 10 * 1024 * 1024
+      });
 
-			const lines = stdout.split('\n').filter((l) => l.trim().length > 0);
-			const nextContactMap = new Map<string, string>();
+      const lines = stdout.split('\n').filter((l) => l.trim().length > 0);
+      const nextContactMap = new Map<string, string>();
 
-			for (const line of lines) {
-				const [name, phonesStr, emailsStr] = line.split('|');
-				if (!name) continue;
+      for (const line of lines) {
+        const [name, phonesStr, emailsStr] = line.split('|');
+        if (!name) continue;
 
-				if (phonesStr) {
-					for (const phone of phonesStr.split(',').filter((p) => p.trim())) {
-						nextContactMap.set(normalizePhone(phone.trim()), name.trim());
-					}
-				}
+        if (phonesStr) {
+          for (const phone of phonesStr.split(',').filter((p) => p.trim())) {
+            nextContactMap.set(normalizePhone(phone.trim()), name.trim());
+          }
+        }
 
-				if (emailsStr) {
-					for (const email of emailsStr.split(',').filter((e) => e.trim())) {
-						nextContactMap.set(email.trim().toLowerCase(), name.trim());
-					}
-				}
-			}
+        if (emailsStr) {
+          for (const email of emailsStr.split(',').filter((e) => e.trim())) {
+            nextContactMap.set(email.trim().toLowerCase(), name.trim());
+          }
+        }
+      }
 
-			const changed = !contactMapsEqual(contactMap, nextContactMap);
-			contactMap = nextContactMap;
-			loaded = true;
-			if (changed) {
-				console.log(`Loaded ${contactMap.size} contact identifiers`);
-			} else if (force) {
-				console.log(`Contacts unchanged (${contactMap.size} identifiers)`);
-			}
-			return true;
-		} catch (err) {
-			console.error('Failed to load contacts:', err);
-			return false;
-		} finally {
-			loading = null; // Allow refreshes/retries later
-		}
-	})();
+      const changed = !contactMapsEqual(contactMap, nextContactMap);
+      contactMap = nextContactMap;
+      loaded = true;
+      if (changed) {
+        console.log(`Loaded ${contactMap.size} contact identifiers`);
+      } else if (force) {
+        console.log(`Contacts unchanged (${contactMap.size} identifiers)`);
+      }
+      return true;
+    } catch (err) {
+      console.error('Failed to load contacts:', err);
+      return false;
+    } finally {
+      loading = null; // Allow refreshes/retries later
+    }
+  })();
 
-	return loading;
+  return loading;
 }
 
 async function refreshContactsAndPhotos(force: boolean, source: 'request' | 'poll'): Promise<void> {
-	const now = Date.now();
-	const initialLoadPending = !loaded || !photosLoaded;
+  const now = Date.now();
+  const initialLoadPending = !loaded || !photosLoaded;
 
-	if (
-		source === 'request' &&
-		initialLoadPending &&
-		now - lastRefreshStartedAt < MIN_RETRY_INTERVAL_MS
-	) {
-		return;
-	}
+  if (
+    source === 'request' &&
+    initialLoadPending &&
+    now - lastRefreshStartedAt < MIN_RETRY_INTERVAL_MS
+  ) {
+    return;
+  }
 
-	if (refreshInFlight) {
-		return refreshInFlight;
-	}
+  if (refreshInFlight) {
+    return refreshInFlight;
+  }
 
-	refreshInFlight = (async () => {
-		lastRefreshStartedAt = Date.now();
+  refreshInFlight = (async () => {
+    lastRefreshStartedAt = Date.now();
 
-		const previousContacts = new Map(contactMap);
-		const previousPhotos = new Map(photoMap);
+    const previousContacts = new Map(contactMap);
+    const previousPhotos = new Map(photoMap);
 
-		const contactsOk = await loadContacts(force);
-		if (!contactsOk) return;
+    const contactsOk = await loadContacts(force);
+    if (!contactsOk) return;
 
-		await exportContactPhotos(force);
+    await exportContactPhotos(force);
 
-		const contactsChanged = !contactMapsEqual(previousContacts, contactMap);
-		const photosChanged = !photoMapsEqual(previousPhotos, photoMap);
+    const contactsChanged = !contactMapsEqual(previousContacts, contactMap);
+    const photosChanged = !photoMapsEqual(previousPhotos, photoMap);
 
-		if (!contactsReadyBroadcasted) {
-			await broadcastContactsReady();
-			contactsReadyBroadcasted = true;
-			return;
-		}
+    if (!contactsReadyBroadcasted) {
+      await broadcastContactsReady();
+      contactsReadyBroadcasted = true;
+      return;
+    }
 
-		if (contactsChanged || photosChanged) {
-			console.log(
-				`[contacts] Refresh detected changes (contacts=${contactsChanged ? 'yes' : 'no'}, photos=${photosChanged ? 'yes' : 'no'})`
-			);
-			await broadcastContactsReady();
-		}
-	})().catch((err) => {
-		console.error('Contacts/photo refresh error:', err);
-	}).finally(() => {
-		refreshInFlight = null;
-	});
+    if (contactsChanged || photosChanged) {
+      console.log(
+        `[contacts] Refresh detected changes (contacts=${contactsChanged ? 'yes' : 'no'}, photos=${photosChanged ? 'yes' : 'no'})`
+      );
+      await broadcastContactsReady();
+    }
+  })()
+    .catch((err) => {
+      console.error('Contacts/photo refresh error:', err);
+    })
+    .finally(() => {
+      refreshInFlight = null;
+    });
 
-	return refreshInFlight;
+  return refreshInFlight;
 }
 
 function startBackgroundRefresh(): void {
-	if (backgroundRefreshTimer) return;
+  if (backgroundRefreshTimer) return;
 
-	backgroundRefreshTimer = setInterval(() => {
-		void refreshContactsAndPhotos(true, 'poll');
-	}, CONTACT_REFRESH_INTERVAL_MS);
+  backgroundRefreshTimer = setInterval(() => {
+    void refreshContactsAndPhotos(true, 'poll');
+  }, CONTACT_REFRESH_INTERVAL_MS);
 
-	if (typeof backgroundRefreshTimer.unref === 'function') {
-		backgroundRefreshTimer.unref();
-	}
+  if (typeof backgroundRefreshTimer.unref === 'function') {
+    backgroundRefreshTimer.unref();
+  }
 }
 
 /** Kick off contact + photo loading in the background. Safe to call multiple times. */
 export function ensureContactsLoading(): void {
-	startBackgroundRefresh();
-	void refreshContactsAndPhotos(false, 'request');
+  startBackgroundRefresh();
+  void refreshContactsAndPhotos(false, 'request');
 }
 
 /** Wait for contacts to finish loading (with optional timeout). Returns true if contacts are available. */
 export async function waitForContacts(timeoutMs = 0): Promise<boolean> {
-	if (loaded) return true;
-	if (!loading) return false;
-	if (timeoutMs <= 0) return loading;
-	return Promise.race([
-		loading,
-		new Promise<boolean>((resolve) => setTimeout(() => resolve(false), timeoutMs))
-	]);
+  if (loaded) return true;
+  if (!loading) return false;
+  if (timeoutMs <= 0) return loading;
+  return Promise.race([
+    loading,
+    new Promise<boolean>((resolve) => setTimeout(() => resolve(false), timeoutMs))
+  ]);
 }
 
 /** Check if contacts have been loaded */
 export function contactsLoaded(): boolean {
-	return loaded;
+  return loaded;
 }
 
 /**
@@ -270,345 +269,342 @@ export function contactsLoaded(): boolean {
  * Stored as PNG files at ~/Library/Messages/NickNameCache/{hash}-ad
  */
 function loadNickNamePhotos(targetMap: Map<string, { path: string; mime: string }>): number {
-	if (!existsSync(NICKNAME_CACHE_DIR)) return 0;
+  if (!existsSync(NICKNAME_CACHE_DIR)) return 0;
 
-	let count = 0;
+  let count = 0;
 
-	// Read from both handledNicknamesKeyStore and pendingNicknamesKeyStore
-	for (const dbName of ['handledNicknamesKeyStore', 'pendingNicknamesKeyStore']) {
-		const dbPath = join(NICKNAME_CACHE_DIR, `${dbName}.db`);
-		if (!existsSync(dbPath)) continue;
+  // Read from both handledNicknamesKeyStore and pendingNicknamesKeyStore
+  for (const dbName of ['handledNicknamesKeyStore', 'pendingNicknamesKeyStore']) {
+    const dbPath = join(NICKNAME_CACHE_DIR, `${dbName}.db`);
+    if (!existsSync(dbPath)) continue;
 
-		try {
-			// Each row: key|value(binary). We need to extract the image path from the plist.
-			// Since the value is binary, we'll use a different approach:
-			// Extract keys, then decode each plist individually.
-			const keysResult = execFileSync(
-				'sqlite3',
-				[dbPath, 'SELECT key FROM kvtable'],
-				{ timeout: 5000 }
-			);
+    try {
+      // Each row: key|value(binary). We need to extract the image path from the plist.
+      // Since the value is binary, we'll use a different approach:
+      // Extract keys, then decode each plist individually.
+      const keysResult = execFileSync('sqlite3', [dbPath, 'SELECT key FROM kvtable'], {
+        timeout: 5000
+      });
 
-			const keys = keysResult
-				.toString()
-				.split('\n')
-				.filter((k) => k.trim());
+      const keys = keysResult
+        .toString()
+        .split('\n')
+        .filter((k) => k.trim());
 
-			for (const key of keys) {
-				try {
-					// Write plist to temp file and decode
-					const tmpPlist = `/tmp/webmsg_nn_${key.replace(/[^a-zA-Z0-9@.+]/g, '_')}.plist`;
-					const tmpXml = tmpPlist + '.xml';
+      for (const key of keys) {
+        try {
+          // Write plist to temp file and decode
+          const tmpPlist = `/tmp/webmsg_nn_${key.replace(/[^a-zA-Z0-9@.+]/g, '_')}.plist`;
+          const tmpXml = tmpPlist + '.xml';
 
-					execFileSync('sqlite3', [
-						dbPath,
-						`SELECT writefile('${tmpPlist}', value) FROM kvtable WHERE key='${key}'`
-					], { timeout: 5000 });
+          execFileSync(
+            'sqlite3',
+            [dbPath, `SELECT writefile('${tmpPlist}', value) FROM kvtable WHERE key='${key}'`],
+            { timeout: 5000 }
+          );
 
-					execFileSync('plutil', ['-convert', 'xml1', tmpPlist, '-o', tmpXml], {
-						timeout: 5000
-					});
+          execFileSync('plutil', ['-convert', 'xml1', tmpPlist, '-o', tmpXml], {
+            timeout: 5000
+          });
 
-					const xml = readFileSync(tmpXml, 'utf-8');
+          const xml = readFileSync(tmpXml, 'utf-8');
 
-					// Find image path in the plist XML (NSKeyedArchiver format)
-					const match = xml.match(
-						/<string>(\/[^<]*NickNameCache\/[^<]*-ad)<\/string>/
-					);
-					if (!match) continue;
+          // Find image path in the plist XML (NSKeyedArchiver format)
+          const match = xml.match(/<string>(\/[^<]*NickNameCache\/[^<]*-ad)<\/string>/);
+          if (!match) continue;
 
-					const imgPath = match[1];
-					if (!existsSync(imgPath)) continue;
+          const imgPath = match[1];
+          if (!existsSync(imgPath)) continue;
 
-					// Normalize the key (phone or email) and add to photoMap
-					const identifier = key.trim();
-					const entry = { path: imgPath, mime: 'image/png' };
+          // Normalize the key (phone or email) and add to photoMap
+          const identifier = key.trim();
+          const entry = { path: imgPath, mime: 'image/png' };
 
-					if (identifier.includes('@')) {
-						targetMap.set(identifier.toLowerCase(), entry);
-					} else if (isPhoneNumber(identifier)) {
-						targetMap.set(normalizePhone(identifier), entry);
-					}
+          if (identifier.includes('@')) {
+            targetMap.set(identifier.toLowerCase(), entry);
+          } else if (isPhoneNumber(identifier)) {
+            targetMap.set(normalizePhone(identifier), entry);
+          }
 
-					count++;
-				} catch {
-					// Skip entries that fail to decode
-				}
-			}
-		} catch {
-			// Skip databases that fail to read
-		}
-	}
+          count++;
+        } catch {
+          // Skip entries that fail to decode
+        }
+      }
+    } catch {
+      // Skip databases that fail to read
+    }
+  }
 
-	return count;
+  return count;
 }
 
 let photosLoading: Promise<void> | null = null;
 
 /** Export contact photos. Loads iMessage NickNameCache photos + Apple Contacts photos. */
 export async function exportContactPhotos(force = false): Promise<void> {
-	if (!force && photosLoaded) return;
-	if (photosLoading) return photosLoading;
+  if (!force && photosLoaded) return;
+  if (photosLoading) return photosLoading;
 
-	photosLoading = (async () => {
-		const nextPhotoMap = new Map<string, { path: string; mime: string }>();
+  photosLoading = (async () => {
+    const nextPhotoMap = new Map<string, { path: string; mime: string }>();
 
-		// 1. Load iMessage shared profile photos (NickNameCache) — fast, local PNGs
-		const nicknameCount = loadNickNamePhotos(nextPhotoMap);
-		console.log(`Loaded ${nicknameCount} iMessage shared profile photos`);
+    // 1. Load iMessage shared profile photos (NickNameCache) — fast, local PNGs
+    const nicknameCount = loadNickNamePhotos(nextPhotoMap);
+    console.log(`Loaded ${nicknameCount} iMessage shared profile photos`);
 
-		// 2. Load Apple Contacts photos via Swift helper — fills gaps
-		try {
-			mkdirSync(PHOTO_CACHE_DIR, { recursive: true });
-			const exporterReady = ensurePhotoExporterBuilt();
-			if (exporterReady && existsSync(PHOTO_EXPORTER)) {
-				const { stdout } = await execFileAsync(PHOTO_EXPORTER, [PHOTO_CACHE_DIR], {
-					timeout: 60000,
-					maxBuffer: 10 * 1024 * 1024
-				});
+    // 2. Load Apple Contacts photos via Swift helper — fills gaps
+    try {
+      mkdirSync(PHOTO_CACHE_DIR, { recursive: true });
+      const exporterReady = ensurePhotoExporterBuilt();
+      if (exporterReady && existsSync(PHOTO_EXPORTER)) {
+        const { stdout } = await execFileAsync(PHOTO_EXPORTER, [PHOTO_CACHE_DIR], {
+          timeout: 60000,
+          maxBuffer: 10 * 1024 * 1024
+        });
 
-				const lines = stdout.split('\n').filter((l) => l.trim().length > 0);
-				let contactPhotoCount = 0;
+        const lines = stdout.split('\n').filter((l) => l.trim().length > 0);
+        let contactPhotoCount = 0;
 
-				for (const line of lines) {
-					const [sanitizedId, phonesStr, emailsStr] = line.split('|');
-					if (!sanitizedId) continue;
+        for (const line of lines) {
+          const [sanitizedId, phonesStr, emailsStr] = line.split('|');
+          if (!sanitizedId) continue;
 
-					const photoPath = join(PHOTO_CACHE_DIR, `${sanitizedId}.jpeg`);
-					if (!existsSync(photoPath)) continue;
+          const photoPath = join(PHOTO_CACHE_DIR, `${sanitizedId}.jpeg`);
+          if (!existsSync(photoPath)) continue;
 
-					const entry = { path: photoPath, mime: 'image/jpeg' };
+          const entry = { path: photoPath, mime: 'image/jpeg' };
 
-					// Only add if not already covered by NickNameCache
-					if (phonesStr) {
-						for (const phone of phonesStr.split(',').filter((p) => p.trim())) {
-							const key = normalizePhone(phone.trim());
-							if (!nextPhotoMap.has(key)) {
-								nextPhotoMap.set(key, entry);
-								contactPhotoCount++;
-							}
-						}
-					}
+          // Only add if not already covered by NickNameCache
+          if (phonesStr) {
+            for (const phone of phonesStr.split(',').filter((p) => p.trim())) {
+              const key = normalizePhone(phone.trim());
+              if (!nextPhotoMap.has(key)) {
+                nextPhotoMap.set(key, entry);
+                contactPhotoCount++;
+              }
+            }
+          }
 
-					if (emailsStr) {
-						for (const email of emailsStr.split(',').filter((e) => e.trim())) {
-							const key = email.trim().toLowerCase();
-							if (!nextPhotoMap.has(key)) {
-								nextPhotoMap.set(key, entry);
-								contactPhotoCount++;
-							}
-						}
-					}
-				}
+          if (emailsStr) {
+            for (const email of emailsStr.split(',').filter((e) => e.trim())) {
+              const key = email.trim().toLowerCase();
+              if (!nextPhotoMap.has(key)) {
+                nextPhotoMap.set(key, entry);
+                contactPhotoCount++;
+              }
+            }
+          }
+        }
 
-				console.log(`Loaded ${contactPhotoCount} additional Apple Contacts photos`);
-			}
-		} catch (err) {
-			console.error('Failed to export Apple Contacts photos:', err);
-		}
+        console.log(`Loaded ${contactPhotoCount} additional Apple Contacts photos`);
+      }
+    } catch (err) {
+      console.error('Failed to export Apple Contacts photos:', err);
+    }
 
-		const changed = !photoMapsEqual(photoMap, nextPhotoMap);
-		photoMap = nextPhotoMap;
-		photosLoaded = true;
+    const changed = !photoMapsEqual(photoMap, nextPhotoMap);
+    photoMap = nextPhotoMap;
+    photosLoaded = true;
 
-		if (changed) {
-			console.log(`Total photo mappings: ${photoMap.size}`);
-		} else if (force) {
-			console.log(`Contact photos unchanged (${photoMap.size} mappings)`);
-		}
-		})().finally(() => {
-			photosLoading = null;
-		});
+    if (changed) {
+      console.log(`Total photo mappings: ${photoMap.size}`);
+    } else if (force) {
+      console.log(`Contact photos unchanged (${photoMap.size} mappings)`);
+    }
+  })().finally(() => {
+    photosLoading = null;
+  });
 
-	return photosLoading;
+  return photosLoading;
 }
 
 /** Get the photo file path for an identifier, or null if no photo */
 export function getContactPhotoPath(identifier: string): { path: string; mime: string } | null {
-	if (!identifier || !photosLoaded) return null;
+  if (!identifier || !photosLoaded) return null;
 
-	// Try email match
-	const emailMatch = photoMap.get(identifier.toLowerCase());
-	if (emailMatch) return emailMatch;
+  // Try email match
+  const emailMatch = photoMap.get(identifier.toLowerCase());
+  if (emailMatch) return emailMatch;
 
-	// Try phone match
-	if (isPhoneNumber(identifier)) {
-		const normalized = normalizePhone(identifier);
-		const phoneMatch = photoMap.get(normalized);
-		if (phoneMatch) return phoneMatch;
-	}
+  // Try phone match
+  if (isPhoneNumber(identifier)) {
+    const normalized = normalizePhone(identifier);
+    const phoneMatch = photoMap.get(normalized);
+    if (phoneMatch) return phoneMatch;
+  }
 
-	return null;
+  return null;
 }
 
 /** Read photo file data, or null if not found */
 export async function getContactPhoto(
-	identifier: string
+  identifier: string
 ): Promise<{ data: Buffer; mime: string } | null> {
-	const info = getContactPhotoPath(identifier);
-	if (!info) return null;
+  const info = getContactPhotoPath(identifier);
+  if (!info) return null;
 
-	try {
-		if (!existsSync(info.path)) return null;
-		const data = await readFile(info.path);
-		return { data, mime: info.mime };
-	} catch {
-		return null;
-	}
+  try {
+    if (!existsSync(info.path)) return null;
+    const data = await readFile(info.path);
+    return { data, mime: info.mime };
+  } catch {
+    return null;
+  }
 }
 
 /** Resolve a handle identifier (phone/email) to a display name */
 export function resolveContact(identifier: string): string {
-	if (!identifier) return 'Unknown';
+  if (!identifier) return 'Unknown';
 
-	const lower = identifier.toLowerCase();
-	const emailMatch = contactMap.get(lower);
-	if (emailMatch) return emailMatch;
+  const lower = identifier.toLowerCase();
+  const emailMatch = contactMap.get(lower);
+  if (emailMatch) return emailMatch;
 
-	if (isPhoneNumber(identifier)) {
-		const normalized = normalizePhone(identifier);
-		const phoneMatch = contactMap.get(normalized);
-		if (phoneMatch) return phoneMatch;
-		// No contact found — format the phone number nicely
-		return formatPhone(identifier);
-	}
+  if (isPhoneNumber(identifier)) {
+    const normalized = normalizePhone(identifier);
+    const phoneMatch = contactMap.get(normalized);
+    if (phoneMatch) return phoneMatch;
+    // No contact found — format the phone number nicely
+    return formatPhone(identifier);
+  }
 
-	return identifier;
+  return identifier;
 }
 
 /** Get all contacts as an array */
 export function getAllContacts(): Contact[] {
-	const byName = new Map<string, Contact>();
+  const byName = new Map<string, Contact>();
 
-	for (const [key, name] of contactMap) {
-		let contact = byName.get(name);
-		if (!contact) {
-			contact = { name, phones: [], emails: [] };
-			byName.set(name, contact);
-		}
-		if (key.includes('@')) {
-			contact.emails.push(key);
-		} else {
-			contact.phones.push(key);
-		}
-	}
+  for (const [key, name] of contactMap) {
+    let contact = byName.get(name);
+    if (!contact) {
+      contact = { name, phones: [], emails: [] };
+      byName.set(name, contact);
+    }
+    if (key.includes('@')) {
+      contact.emails.push(key);
+    } else {
+      contact.phones.push(key);
+    }
+  }
 
-	return Array.from(byName.values());
+  return Array.from(byName.values());
 }
 
 export interface ContactMatch {
-	name: string;
-	identifier: string;
+  name: string;
+  identifier: string;
 }
 
 export interface ContactGroupMatch {
-	name: string;
-	identifiers: string[];
+  name: string;
+  identifiers: string[];
 }
 
 function scoreNameMatch(name: string, query: string): number {
-	if (name === query) return 3;
-	if (name.startsWith(query)) return 2;
-	if (name.includes(query)) return 1;
-	return 0;
+  if (name === query) return 3;
+  if (name.startsWith(query)) return 2;
+  if (name.includes(query)) return 1;
+  return 0;
 }
 
 function contactIdentifiers(contact: Contact): string[] {
-	return [...contact.phones, ...contact.emails]
-		.map((value) => value.trim())
-		.filter((value) => value.length > 0);
+  return [...contact.phones, ...contact.emails]
+    .map((value) => value.trim())
+    .filter((value) => value.length > 0);
 }
 
 function uniqueCaseInsensitive(values: string[]): string[] {
-	const seen = new Set<string>();
-	const unique: string[] = [];
+  const seen = new Set<string>();
+  const unique: string[] = [];
 
-	for (const value of values) {
-		const key = value.toLowerCase();
-		if (seen.has(key)) continue;
-		seen.add(key);
-		unique.push(value);
-	}
+  for (const value of values) {
+    const key = value.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    unique.push(value);
+  }
 
-	return unique;
+  return unique;
 }
 
 /** Find contact identifiers by display name query (exact > prefix > contains). */
 export function findContactMatches(query: string, limit = 5): ContactMatch[] {
-	const q = query.trim().toLowerCase();
-	if (!q) return [];
+  const q = query.trim().toLowerCase();
+  if (!q) return [];
 
-	const candidates: Array<{ score: number; name: string; identifier: string }> = [];
-	const contacts = getAllContacts();
-	for (const contact of contacts) {
-		const name = contact.name.trim();
-		if (!name) continue;
-		const score = scoreNameMatch(name.toLowerCase(), q);
-		if (score === 0) continue;
+  const candidates: Array<{ score: number; name: string; identifier: string }> = [];
+  const contacts = getAllContacts();
+  for (const contact of contacts) {
+    const name = contact.name.trim();
+    if (!name) continue;
+    const score = scoreNameMatch(name.toLowerCase(), q);
+    if (score === 0) continue;
 
-		for (const identifier of contactIdentifiers(contact)) {
-			candidates.push({ score, name, identifier });
-		}
-	}
+    for (const identifier of contactIdentifiers(contact)) {
+      candidates.push({ score, name, identifier });
+    }
+  }
 
-	candidates.sort((a, b) => b.score - a.score || a.name.localeCompare(b.name));
-	const unique: ContactMatch[] = [];
-	const seen = new Set<string>();
-	for (const item of candidates) {
-		const key = item.identifier.toLowerCase();
-		if (seen.has(key)) continue;
-		seen.add(key);
-		unique.push({ name: item.name, identifier: item.identifier });
-		if (unique.length >= limit) break;
-	}
+  candidates.sort((a, b) => b.score - a.score || a.name.localeCompare(b.name));
+  const unique: ContactMatch[] = [];
+  const seen = new Set<string>();
+  for (const item of candidates) {
+    const key = item.identifier.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    unique.push({ name: item.name, identifier: item.identifier });
+    if (unique.length >= limit) break;
+  }
 
-	return unique;
+  return unique;
 }
 
 /** Find contacts by display name query (exact > prefix > contains), grouped by person. */
 export function findContactGroupMatches(query: string, limit = 5): ContactGroupMatch[] {
-	const q = query.trim().toLowerCase();
-	if (!q) return [];
+  const q = query.trim().toLowerCase();
+  if (!q) return [];
 
-	const candidates: Array<{ score: number; name: string; identifiers: string[] }> = [];
-	const contacts = getAllContacts();
-	for (const contact of contacts) {
-		const name = contact.name.trim();
-		if (!name) continue;
-		const score = scoreNameMatch(name.toLowerCase(), q);
-		if (score === 0) continue;
+  const candidates: Array<{ score: number; name: string; identifiers: string[] }> = [];
+  const contacts = getAllContacts();
+  for (const contact of contacts) {
+    const name = contact.name.trim();
+    if (!name) continue;
+    const score = scoreNameMatch(name.toLowerCase(), q);
+    if (score === 0) continue;
 
-		const identifiers = contactIdentifiers(contact);
-		if (identifiers.length === 0) continue;
-		candidates.push({ score, name, identifiers });
-	}
+    const identifiers = contactIdentifiers(contact);
+    if (identifiers.length === 0) continue;
+    candidates.push({ score, name, identifiers });
+  }
 
-	candidates.sort((a, b) => b.score - a.score || a.name.localeCompare(b.name));
-	return candidates.slice(0, limit).map((item) => ({
-		name: item.name,
-		identifiers: item.identifiers
-	}));
+  candidates.sort((a, b) => b.score - a.score || a.name.localeCompare(b.name));
+  return candidates.slice(0, limit).map((item) => ({
+    name: item.name,
+    identifiers: item.identifiers
+  }));
 }
 
 /** Return all known identifiers for the same contact as this phone/email. */
 export function getRelatedContactIdentifiers(identifier: string): string[] {
-	const input = identifier.trim();
-	if (!input) return [];
+  const input = identifier.trim();
+  if (!input) return [];
 
-	const lower = input.toLowerCase();
-	let name = contactMap.get(lower);
-	if (!name && isPhoneNumber(input)) {
-		name = contactMap.get(normalizePhone(input));
-	}
-	if (!name) return [input];
+  const lower = input.toLowerCase();
+  let name = contactMap.get(lower);
+  if (!name && isPhoneNumber(input)) {
+    name = contactMap.get(normalizePhone(input));
+  }
+  if (!name) return [input];
 
-	const contact = getAllContacts().find((c) => c.name === name);
-	if (!contact) return [input];
+  const contact = getAllContacts().find((c) => c.name === name);
+  if (!contact) return [input];
 
-	const ids = contactIdentifiers(contact);
-	if (ids.length === 0) return [input];
+  const ids = contactIdentifiers(contact);
+  if (ids.length === 0) return [input];
 
-	const unique = uniqueCaseInsensitive(ids);
-	if (!unique.some((v) => v.toLowerCase() === lower)) unique.push(input);
-	return unique;
+  const unique = uniqueCaseInsensitive(ids);
+  if (!unique.some((v) => v.toLowerCase() === lower)) unique.push(input);
+  return unique;
 }

@@ -5,11 +5,11 @@ const execFileAsync = promisify(execFile);
 const DEFAULT_TIMEOUT = 10000;
 
 function quoted(value: string): string {
-	return `"${value.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
+  return `"${value.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
 }
 
 function runAppleScript(script: string, timeout = DEFAULT_TIMEOUT): Promise<unknown> {
-	return execFileAsync('osascript', ['-e', script], { timeout });
+  return execFileAsync('osascript', ['-e', script], { timeout });
 }
 
 /**
@@ -17,14 +17,14 @@ function runAppleScript(script: string, timeout = DEFAULT_TIMEOUT): Promise<unkn
  * Works for both 1:1 and existing group chats.
  */
 export async function sendMessage(chatGuid: string, text: string): Promise<void> {
-	const script = `
+  const script = `
 		tell application "Messages"
 			set targetChat to a reference to chat id ${quoted(chatGuid)}
 			send ${quoted(text)} to targetChat
 		end tell
 	`;
 
-	await runAppleScript(script);
+  await runAppleScript(script);
 }
 
 /**
@@ -32,11 +32,11 @@ export async function sendMessage(chatGuid: string, text: string): Promise<void>
  * For new 1:1 conversations.
  */
 export async function sendMessageToHandle(
-	handle: string,
-	text: string,
-	service: 'iMessage' | 'SMS' = 'iMessage'
+  handle: string,
+  text: string,
+  service: 'iMessage' | 'SMS' = 'iMessage'
 ): Promise<void> {
-	const script = `
+  const script = `
 		tell application "Messages"
 			set targetService to 1st account whose service type = ${service}
 			set targetBuddy to participant ${quoted(handle)} of targetService
@@ -44,14 +44,14 @@ export async function sendMessageToHandle(
 		end tell
 	`;
 
-	await runAppleScript(script);
+  await runAppleScript(script);
 }
 
 /**
  * Send a file attachment via AppleScript.
  */
 export async function sendAttachment(chatGuid: string, filePath: string): Promise<void> {
-	const script = `
+  const script = `
 		tell application "Messages"
 			set targetChat to a reference to chat id ${quoted(chatGuid)}
 			set theAttachment to POSIX file ${quoted(filePath)}
@@ -59,5 +59,5 @@ export async function sendAttachment(chatGuid: string, filePath: string): Promis
 		end tell
 	`;
 
-	await runAppleScript(script, 30000);
+  await runAppleScript(script, 30000);
 }

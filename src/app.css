@@ -1,15 +1,15 @@
 @import 'tailwindcss';
 
 :root {
-	--color-imessage-blue: #007aff;
-	--color-imessage-green: #34c759;
-	--color-bubble-gray: #e9e9eb;
-	--color-bubble-gray-dark: #3a3a3c;
+  --color-imessage-blue: #007aff;
+  --color-imessage-green: #34c759;
+  --color-bubble-gray: #e9e9eb;
+  --color-bubble-gray-dark: #3a3a3c;
 }
 
 html,
 body {
-	height: 100%;
-	margin: 0;
-	overflow: hidden;
+  height: 100%;
+  margin: 0;
+  overflow: hidden;
 }
