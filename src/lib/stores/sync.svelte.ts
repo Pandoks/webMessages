@@ -20,6 +20,7 @@ import {
 	disconnect,
 	onNewMessages,
 	onContactsReady,
+	onChatReadState,
 	getConnectionState
 } from './connection.svelte.js';
 import {
@@ -35,6 +36,7 @@ import type { Chat, Message, Participant } from '$lib/types/index.js';
 let activeChatId: number | null = null;
 let unsubscribeMessages: (() => void) | null = null;
 let unsubscribeContacts: (() => void) | null = null;
+let unsubscribeChatReadState: (() => void) | null = null;
 
 function refreshVisibleData() {
 	void refreshChatList();
@@ -82,6 +84,7 @@ export function initSync() {
 	// 4. Register SSE handlers
 	unsubscribeMessages = onNewMessages(handleNewMessages);
 	unsubscribeContacts = onContactsReady(refreshVisibleData);
+	unsubscribeChatReadState = onChatReadState(handleChatReadState);
 
 	return () => {
 		if (unsubscribeMessages) {
@@ -91,6 +94,10 @@ export function initSync() {
 		if (unsubscribeContacts) {
 			unsubscribeContacts();
 			unsubscribeContacts = null;
+		}
+		if (unsubscribeChatReadState) {
+			unsubscribeChatReadState();
+			unsubscribeChatReadState = null;
 		}
 		disconnect();
 	};
@@ -229,6 +236,14 @@ function handleNewMessages(events: { chatId: number; message: Message }[]) {
 	const hasUnknown = events.some((e) => !knownChatIds.has(e.chatId));
 	if (hasUnknown) {
 		refreshVisibleData();
+	}
+}
+
+function handleChatReadState(event: { chatIds: number[] }) {
+	if (!event.chatIds?.length) return;
+	void refreshChatList();
+	if (activeChatId !== null && event.chatIds.includes(activeChatId)) {
+		void loadChat(activeChatId);
 	}
 }
 

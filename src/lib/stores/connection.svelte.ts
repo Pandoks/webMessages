@@ -5,6 +5,10 @@ type NewMessageEvent = {
 	message: Message;
 };
 
+type ChatReadStateEvent = {
+	chatIds: number[];
+};
+
 let eventSource: EventSource | null = $state(null);
 let connected = $state(false);
 let isOffline = $state(false);
@@ -13,6 +17,7 @@ let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 
 const messageListeners = new Set<(events: NewMessageEvent[]) => void>();
 const contactsReadyListeners = new Set<() => void>();
+const chatReadStateListeners = new Set<(event: ChatReadStateEvent) => void>();
 
 function clearTimer(timer: ReturnType<typeof setTimeout> | null): null {
 	if (timer) clearTimeout(timer);
@@ -35,6 +40,11 @@ export function onNewMessages(callback: (events: NewMessageEvent[]) => void) {
 export function onContactsReady(callback: () => void) {
 	contactsReadyListeners.add(callback);
 	return () => contactsReadyListeners.delete(callback);
+}
+
+export function onChatReadState(callback: (event: ChatReadStateEvent) => void) {
+	chatReadStateListeners.add(callback);
+	return () => chatReadStateListeners.delete(callback);
 }
 
 export function getConnectionState() {
@@ -67,6 +77,11 @@ export function connect() {
 
 	eventSource.addEventListener('contacts_ready', () => {
 		notifyVoid(contactsReadyListeners);
+	});
+
+	eventSource.addEventListener('chat_read_state', (event) => {
+		const data = JSON.parse(event.data) as ChatReadStateEvent;
+		notify(chatReadStateListeners, data);
 	});
 
 	eventSource.onerror = () => {

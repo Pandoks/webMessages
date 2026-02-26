@@ -37,6 +37,11 @@ interface DirectChatRow {
 	handle_identifier: string;
 }
 
+interface ChatReadSnapshotRow {
+	rowid: number;
+	last_read_message_timestamp: number;
+}
+
 type DbStmt = ReturnType<ReturnType<typeof getDb>['prepare']>;
 
 // Cache prepared statements (created once, reused)
@@ -44,6 +49,7 @@ let _chatListStmt: DbStmt | null = null;
 let _chatParticipantsStmt: DbStmt | null = null;
 let _chatByIdStmt: DbStmt | null = null;
 let _directChatsByHandleStmt: DbStmt | null = null;
+let _chatReadSnapshotsStmt: DbStmt | null = null;
 
 const UNREAD_COUNT_SQL = `
 	(
@@ -176,6 +182,18 @@ function directChatsByHandleStmt() {
 	return _directChatsByHandleStmt;
 }
 
+function chatReadSnapshotsStmt() {
+	if (!_chatReadSnapshotsStmt) {
+		_chatReadSnapshotsStmt = getDb().prepare<[], ChatReadSnapshotRow>(`
+			SELECT
+				c.ROWID as rowid,
+				COALESCE(c.last_read_message_timestamp, 0) as last_read_message_timestamp
+			FROM chat c
+		`);
+	}
+	return _chatReadSnapshotsStmt;
+}
+
 function directChatsByHandle(identifier: string): DirectChatRow[] {
 	return directChatsByHandleStmt().all(identifier, identifier) as DirectChatRow[];
 }
@@ -210,6 +228,14 @@ export function getChatById(chatId: number): Chat | null {
 	const row = chatByIdStmt().get(chatId) as ChatRow | undefined;
 	if (!row) return null;
 	return rowToChat(row);
+}
+
+export function getChatReadSnapshots(): Array<{ chatId: number; lastReadTimestamp: number }> {
+	const rows = chatReadSnapshotsStmt().all() as ChatReadSnapshotRow[];
+	return rows.map((row) => ({
+		chatId: row.rowid,
+		lastReadTimestamp: row.last_read_message_timestamp
+	}));
 }
 
 export function findDirectChatByHandleIdentifier(

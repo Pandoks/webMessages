@@ -92,6 +92,12 @@ export interface Contact {
 }
 
 export interface SSEEvent {
-	type: 'new_messages' | 'updated_messages' | 'typing' | 'connected';
+	type:
+		| 'new_messages'
+		| 'chat_read_state'
+		| 'contacts_ready'
+		| 'updated_messages'
+		| 'typing'
+		| 'connected';
 	data: unknown;
 }
