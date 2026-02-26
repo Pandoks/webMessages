@@ -8,8 +8,7 @@
 		"preview": "./scripts/server/with-bridge.sh vite preview",
 		"bridge:start": "./scripts/server/start-messages.sh",
 		"bridge:stop": "./scripts/server/stop-messages.sh",
-		"docker:build": "docker build -t webmessages:local .",
-		"runtime:package": "./scripts/packaging/package-runtime.sh"
+		"bundle:single": "./scripts/packaging/package-single-file.sh"
 	},
 	"devDependencies": {
 		"@sveltejs/adapter-node": "^5.0.0",
