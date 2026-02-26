@@ -16,6 +16,9 @@ static dispatch_queue_t gPollQueue = NULL;
 static dispatch_source_t gPollTimer = NULL;
 static NSString *kListenerID = @"com.apple.MobileSMS";
 static const unsigned int kListenerCapabilities = 2162567; // Barcelona defaults (status/chats/send/history/etc.)
+static const int kHistoryLookupTimeoutSeconds = 8;
+
+static void runOnMainSync(dispatch_block_t block);
 
 static void writeResponse(NSDictionary *response) {
     NSData *jsonData = [NSJSONSerialization dataWithJSONObject:response options:0 error:nil];
@@ -46,6 +49,52 @@ static id callObjc2(id target, NSString *selectorName, id arg1, id arg2) {
     SEL sel = NSSelectorFromString(selectorName);
     if (![target respondsToSelector:sel]) return nil;
     return ((id (*)(id, SEL, id, id))objc_msgSend)(target, sel, arg1, arg2);
+}
+
+static id messageItemFromMessageObject(id messageObject) {
+    if (!messageObject) return nil;
+    id messageItem = callObjc0(messageObject, @"_imMessageItem");
+    if (!messageItem) messageItem = callObjc0(messageObject, @"imMessageItem");
+    return messageItem;
+}
+
+static BOOL invokeHistoryLookup(
+    id historyController,
+    NSString *selectorName,
+    NSString *messageGuid,
+    NSString *timeoutLabel,
+    void (^handler)(id result)
+) {
+    if (!historyController || !selectorName.length || !messageGuid.length || !handler) return NO;
+
+    SEL selector = NSSelectorFromString(selectorName);
+    if (![historyController respondsToSelector:selector]) return NO;
+
+    dispatch_semaphore_t sem = dispatch_semaphore_create(0);
+    runOnMainSync(^{
+        ((void (*)(id, SEL, id, id))objc_msgSend)(
+            historyController,
+            selector,
+            messageGuid,
+            ^(id result) {
+                @try {
+                    handler(result);
+                } @catch (NSException *e) {
+                    NSLog(@"[imcore-bridge] Error in %@ callback: %@", timeoutLabel ?: selectorName, e);
+                } @finally {
+                    dispatch_semaphore_signal(sem);
+                }
+            }
+        );
+    });
+
+    if (dispatch_semaphore_wait(
+            sem,
+            dispatch_time(DISPATCH_TIME_NOW, (int64_t)kHistoryLookupTimeoutSeconds * NSEC_PER_SEC)
+        ) != 0) {
+        NSLog(@"[imcore-bridge] %@ timed out for %@", timeoutLabel ?: selectorName, messageGuid);
+    }
+    return YES;
 }
 
 static id safeExistingMessagePartForGuid(id chat, NSString *partGuid) {
@@ -311,8 +360,7 @@ static NSString *tryUnsendWithChatAndItem(id chat, id messageItem, id messageObj
     if (!chat || !messageGuid.length) return @"Invalid chat or message GUID";
 
     if (!messageItem && messageObj) {
-        messageItem = callObjc0(messageObj, @"_imMessageItem");
-        if (!messageItem) messageItem = callObjc0(messageObj, @"imMessageItem");
+        messageItem = messageItemFromMessageObject(messageObj);
     }
     if (!messageObj && messageItem) {
         messageObj = callObjc0(messageItem, @"message");
@@ -529,8 +577,7 @@ static NSString *tryEditWithChatAndItem(id chat, id messageObj, id messageItem, 
     if (!messageItem && !messageObj) return @"Message lookup failed";
 
     if (!messageItem && messageObj) {
-        messageItem = callObjc0(messageObj, @"_imMessageItem");
-        if (!messageItem) messageItem = callObjc0(messageObj, @"imMessageItem");
+        messageItem = messageItemFromMessageObject(messageObj);
     }
     if (!messageObj && messageItem) {
         messageObj = callObjc0(messageItem, @"message");
@@ -1006,8 +1053,7 @@ static NSString *threadIdentifierFromMessageLikeObject(id messageObject, NSUInte
     if (threadIdentifierHasOriginatorGuid(threadId)) return threadId;
 
     id messageItem = messageObject;
-    id derivedMessageItem = callObjc0(messageObject, @"_imMessageItem");
-    if (!derivedMessageItem) derivedMessageItem = callObjc0(messageObject, @"imMessageItem");
+    id derivedMessageItem = messageItemFromMessageObject(messageObject);
     if (derivedMessageItem) messageItem = derivedMessageItem;
 
     NSArray *partItems = messagePartChatItemsFromMessageItem(messageItem, nil);
@@ -1026,7 +1072,7 @@ static NSString *threadIdentifierFromMessageLikeObject(id messageObject, NSUInte
     return threadId;
 }
 
-static id resolveChat(id registry, NSString *chatGuid) {
+static id resolveChatSingleAttempt(id registry, NSString *chatGuid) {
     if (!registry || !chatGuid.length) return nil;
 
     id chat = callObjc1(registry, @"existingChatWithGUID:", chatGuid);
@@ -1043,20 +1089,61 @@ static id resolveChat(id registry, NSString *chatGuid) {
     chat = chatByHandleFallback(registry, chatGuid);
     if (chat) return chat;
 
-    // IMCore can take a moment after daemon connect before registry lookups return.
-    for (NSInteger attempt = 0; attempt < 15; attempt++) {
-        usleep(200 * 1000);
-        chat = callObjc1(registry, @"existingChatWithGUID:", chatGuid);
-        if (chat) return chat;
-        chat = chatFromRegistryList(registry, chatGuid);
-        if (chat) return chat;
-        chat = chatByIdentifier(registry, chatIdentifier, serviceName);
-        if (chat) return chat;
-        chat = chatByHandleFallback(registry, chatGuid);
-        if (chat) return chat;
+    return nil;
+}
+
+static void loadMessageAndItemForGuid(
+    NSString *messageGuid,
+    id *outMessageObj,
+    id *outMessageItem,
+    BOOL *outDidLookup
+) {
+    if (outMessageObj) *outMessageObj = nil;
+    if (outMessageItem) *outMessageItem = nil;
+    if (outDidLookup) *outDidLookup = NO;
+    if (!messageGuid.length) return;
+
+    Class IMChatHistoryControllerCls = NSClassFromString(@"IMChatHistoryController");
+    if (!IMChatHistoryControllerCls) return;
+
+    id histCtrl = ((id (*)(id, SEL))objc_msgSend)(IMChatHistoryControllerCls, NSSelectorFromString(@"sharedInstance"));
+    if (!histCtrl) return;
+
+    __block id messageObj = nil;
+    __block id messageItem = nil;
+    BOOL didLookup = NO;
+
+    didLookup = invokeHistoryLookup(
+        histCtrl,
+        @"loadMessageWithGUID:completionBlock:",
+        messageGuid,
+        @"loadMessageWithGUID",
+        ^(id message) {
+            messageObj = message;
+            messageItem = messageItemFromMessageObject(message);
+        }
+    ) || didLookup;
+
+    if (!messageItem) {
+        didLookup = invokeHistoryLookup(
+            histCtrl,
+            @"loadMessageItemWithGUID:completionBlock:",
+            messageGuid,
+            @"loadMessageItemWithGUID",
+            ^(id item) {
+                messageItem = item;
+                if (!messageObj) messageObj = callObjc0(item, @"message");
+            }
+        ) || didLookup;
     }
 
-    return nil;
+    if (!messageObj && messageItem) {
+        messageObj = callObjc0(messageItem, @"message");
+    }
+
+    if (outMessageObj) *outMessageObj = messageObj;
+    if (outMessageItem) *outMessageItem = messageItem;
+    if (outDidLookup) *outDidLookup = didLookup;
 }
 
 static void processCommand(NSDictionary *command) {
@@ -1067,7 +1154,15 @@ static void processCommand(NSDictionary *command) {
     NSMutableDictionary *response = [NSMutableDictionary dictionaryWithDictionary:@{@"id": cmdId ?: @"unknown"}];
 
     @try {
-        Class IMChatRegistryCls = NSClassFromString(@"IMChatRegistry");
+        __block Class IMChatRegistryCls = Nil;
+        __block id registry = nil;
+        runOnMainSync(^{
+            IMChatRegistryCls = NSClassFromString(@"IMChatRegistry");
+            if (IMChatRegistryCls) {
+                registry = ((id (*)(id, SEL))objc_msgSend)(IMChatRegistryCls, NSSelectorFromString(@"sharedInstance"));
+            }
+        });
+
         if (!IMChatRegistryCls) {
             response[@"success"] = @NO;
             response[@"error"] = @"IMChatRegistry class not found — IMCore not loaded";
@@ -1075,11 +1170,22 @@ static void processCommand(NSDictionary *command) {
             return;
         }
 
-        id registry = ((id (*)(id, SEL))objc_msgSend)(IMChatRegistryCls, NSSelectorFromString(@"sharedInstance"));
-        id chat = resolveChat(registry, chatGuid);
+        __block id chat = nil;
+        for (NSInteger attempt = 0; attempt < 15; attempt++) {
+            runOnMainSync(^{
+                chat = resolveChatSingleAttempt(registry, chatGuid);
+            });
+            if (chat) break;
+            if (attempt < 14) {
+                usleep(200 * 1000);
+            }
+        }
 
         if (!chat) {
-            NSUInteger chatCount = chatCountFromRegistry(registry);
+            __block NSUInteger chatCount = 0;
+            runOnMainSync(^{
+                chatCount = chatCountFromRegistry(registry);
+            });
             response[@"success"] = @NO;
             response[@"error"] = [NSString stringWithFormat:@"Chat not found: %@ (registry chats: %lu)", chatGuid, (unsigned long)chatCount];
             writeResponse(response);
@@ -1149,76 +1255,68 @@ static void processCommand(NSDictionary *command) {
                 return;
             }
 
-            // Load target message to extract thread identifier
-            dispatch_semaphore_t sem = dispatch_semaphore_create(0);
+            // Load target message to extract thread identifier.
             __block NSString *threadId = nil;
-            __block BOOL didQueryThread = NO;
+            BOOL didQueryThread = NO;
 
             Class IMChatHistoryControllerCls = NSClassFromString(@"IMChatHistoryController");
             if (IMChatHistoryControllerCls) {
-                id histCtrl = ((id (*)(id, SEL))objc_msgSend)(IMChatHistoryControllerCls, NSSelectorFromString(@"sharedInstance"));
-                SEL loadMessageItemSel = NSSelectorFromString(@"loadMessageItemWithGUID:completionBlock:");
-                SEL loadMessageSel = NSSelectorFromString(@"loadMessageWithGUID:completionBlock:");
+                id histCtrl = ((id (*)(id, SEL))objc_msgSend)(
+                    IMChatHistoryControllerCls,
+                    NSSelectorFromString(@"sharedInstance")
+                );
 
-                if (histCtrl && [histCtrl respondsToSelector:loadMessageItemSel]) {
-                    didQueryThread = YES;
-                    runOnMainSync(^{
-                        ((void (*)(id, SEL, id, id))objc_msgSend)(histCtrl,
-                            loadMessageItemSel,
-                            messageGuid,
-                            ^(id messageItem) {
-                                @try {
-                                    if (messageItem) {
-                                        threadId = threadIdentifierFromMessageLikeObject(messageItem, [partIndex unsignedIntegerValue]);
-                                        if (!threadId) {
-                                            for (NSString *sel in @[@"message", @"imMessage", @"messageObject"]) {
-                                                id nested = callObjc0(messageItem, sel);
-                                                threadId = threadIdentifierFromMessageLikeObject(nested, [partIndex unsignedIntegerValue]);
-                                                if (threadId) break;
-                                            }
-                                        }
-                                        if (threadId) {
-                                            NSLog(@"[imcore-bridge] Reply threadIdentifier from messageItem (%@): %@",
-                                                  NSStringFromClass([messageItem class]), threadId);
-                                        }
-                                    }
-                                } @catch (NSException *e) {
-                                    NSLog(@"[imcore-bridge] Error in messageItem callback: %@", e);
-                                }
-                                dispatch_semaphore_signal(sem);
-                            });
-                    });
-                    if (dispatch_semaphore_wait(sem, dispatch_time(DISPATCH_TIME_NOW, 8 * NSEC_PER_SEC)) != 0) {
-                        NSLog(@"[imcore-bridge] loadMessageItemWithGUID timed out for %@", messageGuid);
+                didQueryThread = invokeHistoryLookup(
+                    histCtrl,
+                    @"loadMessageItemWithGUID:completionBlock:",
+                    messageGuid,
+                    @"loadMessageItemWithGUID",
+                    ^(id messageItem) {
+                        if (!messageItem) return;
+
+                        threadId = threadIdentifierFromMessageLikeObject(
+                            messageItem,
+                            [partIndex unsignedIntegerValue]
+                        );
+                        if (!threadId) {
+                            for (NSString *sel in @[@"message", @"imMessage", @"messageObject"]) {
+                                id nested = callObjc0(messageItem, sel);
+                                threadId = threadIdentifierFromMessageLikeObject(
+                                    nested,
+                                    [partIndex unsignedIntegerValue]
+                                );
+                                if (threadId) break;
+                            }
+                        }
+
+                        if (threadId) {
+                            NSLog(@"[imcore-bridge] Reply threadIdentifier from messageItem (%@): %@",
+                                  NSStringFromClass([messageItem class]), threadId);
+                        }
                     }
-                }
+                ) || didQueryThread;
 
                 // On some macOS builds, messageItem APIs don't expose thread data.
                 // Fall back to loadMessageWithGUID if needed.
-                if (!threadId && histCtrl && [histCtrl respondsToSelector:loadMessageSel]) {
-                    didQueryThread = YES;
-                    runOnMainSync(^{
-                        ((void (*)(id, SEL, id, id))objc_msgSend)(histCtrl,
-                            loadMessageSel,
-                            messageGuid,
-                            ^(id message) {
-                                @try {
-                                    if (message) {
-                                        threadId = threadIdentifierFromMessageLikeObject(message, [partIndex unsignedIntegerValue]);
-                                        if (threadId) {
-                                            NSLog(@"[imcore-bridge] Reply threadIdentifier from message (%@): %@",
-                                                  NSStringFromClass([message class]), threadId);
-                                        }
-                                    }
-                                } @catch (NSException *e) {
-                                    NSLog(@"[imcore-bridge] Error in message callback: %@", e);
-                                }
-                                dispatch_semaphore_signal(sem);
-                            });
-                    });
-                    if (dispatch_semaphore_wait(sem, dispatch_time(DISPATCH_TIME_NOW, 8 * NSEC_PER_SEC)) != 0) {
-                        NSLog(@"[imcore-bridge] loadMessageWithGUID timed out for %@", messageGuid);
-                    }
+                if (!threadId) {
+                    didQueryThread = invokeHistoryLookup(
+                        histCtrl,
+                        @"loadMessageWithGUID:completionBlock:",
+                        messageGuid,
+                        @"loadMessageWithGUID",
+                        ^(id message) {
+                            if (!message) return;
+
+                            threadId = threadIdentifierFromMessageLikeObject(
+                                message,
+                                [partIndex unsignedIntegerValue]
+                            );
+                            if (threadId) {
+                                NSLog(@"[imcore-bridge] Reply threadIdentifier from message (%@): %@",
+                                      NSStringFromClass([message class]), threadId);
+                            }
+                        }
+                    ) || didQueryThread;
                 }
             }
 
@@ -1400,50 +1498,10 @@ static void processCommand(NSDictionary *command) {
                 return;
             }
 
-            dispatch_semaphore_t sem;
-            __block id messageObj = nil;
-            __block id messageItem = nil;
-            __block BOOL didLookup = NO;
-
-            Class IMChatHistoryControllerCls = NSClassFromString(@"IMChatHistoryController");
-            if (IMChatHistoryControllerCls) {
-                id histCtrl = ((id (*)(id, SEL))objc_msgSend)(IMChatHistoryControllerCls, NSSelectorFromString(@"sharedInstance"));
-                SEL loadMessageSel = NSSelectorFromString(@"loadMessageWithGUID:completionBlock:");
-                SEL loadMessageItemSel = NSSelectorFromString(@"loadMessageItemWithGUID:completionBlock:");
-
-                if (histCtrl && [histCtrl respondsToSelector:loadMessageSel]) {
-                    didLookup = YES;
-                    sem = dispatch_semaphore_create(0);
-                    runOnMainSync(^{
-                        ((void (*)(id, SEL, id, id))objc_msgSend)(histCtrl,
-                            loadMessageSel,
-                            messageGuid,
-                            ^(id message) {
-                                messageObj = message;
-                                messageItem = callObjc0(message, @"_imMessageItem");
-                                if (!messageItem) messageItem = callObjc0(message, @"imMessageItem");
-                                dispatch_semaphore_signal(sem);
-                            });
-                    });
-                    (void)dispatch_semaphore_wait(sem, dispatch_time(DISPATCH_TIME_NOW, 8 * NSEC_PER_SEC));
-                }
-
-                if (!messageItem && histCtrl && [histCtrl respondsToSelector:loadMessageItemSel]) {
-                    didLookup = YES;
-                    sem = dispatch_semaphore_create(0);
-                    runOnMainSync(^{
-                        ((void (*)(id, SEL, id, id))objc_msgSend)(histCtrl,
-                            loadMessageItemSel,
-                            messageGuid,
-                            ^(id item) {
-                                messageItem = item;
-                                if (!messageObj) messageObj = callObjc0(item, @"message");
-                                dispatch_semaphore_signal(sem);
-                            });
-                    });
-                    (void)dispatch_semaphore_wait(sem, dispatch_time(DISPATCH_TIME_NOW, 8 * NSEC_PER_SEC));
-                }
-            }
+            id messageObj = nil;
+            id messageItem = nil;
+            BOOL didLookup = NO;
+            loadMessageAndItemForGuid(messageGuid, &messageObj, &messageItem, &didLookup);
 
             __block NSString *editSendError = nil;
 
@@ -1473,50 +1531,10 @@ static void processCommand(NSDictionary *command) {
                 return;
             }
 
-            dispatch_semaphore_t sem;
-            __block id messageObj = nil;
-            __block id messageItem = nil;
-            __block BOOL didLookup = NO;
-
-            Class IMChatHistoryControllerCls = NSClassFromString(@"IMChatHistoryController");
-            if (IMChatHistoryControllerCls) {
-                id histCtrl = ((id (*)(id, SEL))objc_msgSend)(IMChatHistoryControllerCls, NSSelectorFromString(@"sharedInstance"));
-                SEL loadMessageSel = NSSelectorFromString(@"loadMessageWithGUID:completionBlock:");
-                SEL loadMessageItemSel = NSSelectorFromString(@"loadMessageItemWithGUID:completionBlock:");
-
-                if (histCtrl && [histCtrl respondsToSelector:loadMessageSel]) {
-                    didLookup = YES;
-                    sem = dispatch_semaphore_create(0);
-                    runOnMainSync(^{
-                        ((void (*)(id, SEL, id, id))objc_msgSend)(histCtrl,
-                            loadMessageSel,
-                            messageGuid,
-                            ^(id message) {
-                                messageObj = message;
-                                messageItem = callObjc0(message, @"_imMessageItem");
-                                if (!messageItem) messageItem = callObjc0(message, @"imMessageItem");
-                                dispatch_semaphore_signal(sem);
-                            });
-                    });
-                    (void)dispatch_semaphore_wait(sem, dispatch_time(DISPATCH_TIME_NOW, 8 * NSEC_PER_SEC));
-                }
-
-                if (!messageItem && histCtrl && [histCtrl respondsToSelector:loadMessageItemSel]) {
-                    didLookup = YES;
-                    sem = dispatch_semaphore_create(0);
-                    runOnMainSync(^{
-                        ((void (*)(id, SEL, id, id))objc_msgSend)(histCtrl,
-                            loadMessageItemSel,
-                            messageGuid,
-                            ^(id item) {
-                                messageItem = item;
-                                if (!messageObj) messageObj = callObjc0(item, @"message");
-                                dispatch_semaphore_signal(sem);
-                            });
-                    });
-                    (void)dispatch_semaphore_wait(sem, dispatch_time(DISPATCH_TIME_NOW, 8 * NSEC_PER_SEC));
-                }
-            }
+            id messageObj = nil;
+            id messageItem = nil;
+            BOOL didLookup = NO;
+            loadMessageAndItemForGuid(messageGuid, &messageObj, &messageItem, &didLookup);
 
             __block NSString *unsendError = nil;
             runOnMainSync(^{
@@ -1545,49 +1563,9 @@ static void processCommand(NSDictionary *command) {
                 return;
             }
 
-            dispatch_semaphore_t sem;
-            __block id messageObj = nil;
-            __block id messageItem = nil;
-
-            Class IMChatHistoryControllerCls = NSClassFromString(@"IMChatHistoryController");
-            if (IMChatHistoryControllerCls) {
-                id histCtrl = ((id (*)(id, SEL))objc_msgSend)(IMChatHistoryControllerCls, NSSelectorFromString(@"sharedInstance"));
-                SEL loadMessageSel = NSSelectorFromString(@"loadMessageWithGUID:completionBlock:");
-                SEL loadMessageItemSel = NSSelectorFromString(@"loadMessageItemWithGUID:completionBlock:");
-
-                if (histCtrl && [histCtrl respondsToSelector:loadMessageSel]) {
-                    sem = dispatch_semaphore_create(0);
-                    runOnMainSync(^{
-                        ((void (*)(id, SEL, id, id))objc_msgSend)(histCtrl,
-                            loadMessageSel,
-                            messageGuid,
-                            ^(id message) {
-                                messageObj = message;
-                                messageItem = callObjc0(message, @"_imMessageItem");
-                                if (!messageItem) messageItem = callObjc0(message, @"imMessageItem");
-                                dispatch_semaphore_signal(sem);
-                            });
-                    });
-                    (void)dispatch_semaphore_wait(sem, dispatch_time(DISPATCH_TIME_NOW, 8 * NSEC_PER_SEC));
-                }
-
-                if (!messageItem && histCtrl && [histCtrl respondsToSelector:loadMessageItemSel]) {
-                    sem = dispatch_semaphore_create(0);
-                    runOnMainSync(^{
-                        ((void (*)(id, SEL, id, id))objc_msgSend)(histCtrl,
-                            loadMessageItemSel,
-                            messageGuid,
-                            ^(id item) {
-                                messageItem = item;
-                                if (!messageObj) messageObj = callObjc0(item, @"message");
-                                dispatch_semaphore_signal(sem);
-                            });
-                    });
-                    (void)dispatch_semaphore_wait(sem, dispatch_time(DISPATCH_TIME_NOW, 8 * NSEC_PER_SEC));
-                }
-            }
-
-            if (!messageObj && messageItem) messageObj = callObjc0(messageItem, @"message");
+            id messageObj = nil;
+            id messageItem = nil;
+            loadMessageAndItemForGuid(messageGuid, &messageObj, &messageItem, NULL);
 
             NSString *partGuid = [NSString stringWithFormat:@"p:%lu/%@", (unsigned long)[partIndex unsignedIntegerValue], messageGuid];
             id existingPart = safeExistingMessagePartForGuid(chat, partGuid);

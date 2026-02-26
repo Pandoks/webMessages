@@ -1,32 +1,33 @@
 import Contacts
 import Foundation
 
-let args = CommandLine.arguments
-guard args.count > 1 else {
-    fputs("Usage: export-photos <output-dir>\n", stderr)
+@inline(__always)
+func fail(_ message: String) -> Never {
+    fputs("\(message)\n", stderr)
     exit(1)
 }
 
-let cacheDir = args[1]
+guard let cacheDir = CommandLine.arguments.dropFirst().first else {
+    fail("Usage: export-photos <output-dir>")
+}
 
 // Create output directory
 try FileManager.default.createDirectory(atPath: cacheDir, withIntermediateDirectories: true)
 
 let store = CNContactStore()
-
-// Request access synchronously
-let semaphore = DispatchSemaphore(value: 0)
-var authorized = false
-
-store.requestAccess(for: .contacts) { granted, _ in
-    authorized = granted
-    semaphore.signal()
-}
-semaphore.wait()
+let authorized: Bool = {
+    let semaphore = DispatchSemaphore(value: 0)
+    var granted = false
+    store.requestAccess(for: .contacts) { value, _ in
+        granted = value
+        semaphore.signal()
+    }
+    semaphore.wait()
+    return granted
+}()
 
 guard authorized else {
-    fputs("Contacts access denied\n", stderr)
-    exit(1)
+    fail("Contacts access denied")
 }
 
 let keys = [
@@ -41,11 +42,11 @@ try store.enumerateContacts(with: request) { contact, _ in
     guard let data = contact.thumbnailImageData else { return }
 
     let id = contact.identifier.replacingOccurrences(of: ":", with: "_")
-    let path = "\(cacheDir)/\(id).jpeg"
+    let outputURL = URL(fileURLWithPath: cacheDir).appendingPathComponent("\(id).jpeg")
 
-    // Write photo if not already cached
-    if !FileManager.default.fileExists(atPath: path) {
-        try? data.write(to: URL(fileURLWithPath: path))
+    // Incremental update: only write when photo bytes changed.
+    if (try? Data(contentsOf: outputURL)) != data {
+        try? data.write(to: outputURL, options: .atomic)
     }
 
     // Always output the mapping (even for cached files)
