@@ -11,10 +11,12 @@
 		reactions: DbMessage[];
 		onReact: (messageGuid: string, reaction: string) => void;
 		onReply: (message: DbMessage) => void;
+		onEdit: (messageGuid: string, newText: string) => Promise<void>;
+		onUnsend: (messageGuid: string) => Promise<void>;
 		replyToText: string | null;
 	}
 
-	let { message, attachments, senderName, showSender, reactions, onReact, onReply, replyToText }: Props = $props();
+	let { message, attachments, senderName, showSender, reactions, onReact, onReply, onEdit, onUnsend, replyToText }: Props = $props();
 
 	const isSent = $derived(message.isFromMe);
 	const isRetracted = $derived(message.dateRetracted !== null);
@@ -22,6 +24,8 @@
 
 	let showPicker = $state(false);
 	let hoverTimeout: ReturnType<typeof setTimeout> | undefined = $state();
+	let editing = $state(false);
+	let editText = $state('');
 
 	const reactionTypeToEmoji: Record<number, string> = {
 		2000: '❤️',
@@ -133,6 +137,26 @@
 		onReply(message);
 	}
 
+	function startEdit() {
+		editText = message.text ?? '';
+		editing = true;
+		showPicker = false;
+	}
+
+	async function saveEdit() {
+		await onEdit(message.guid, editText);
+		editing = false;
+	}
+
+	function cancelEdit() {
+		editing = false;
+	}
+
+	function handleUnsend() {
+		showPicker = false;
+		onUnsend(message.guid);
+	}
+
 	const truncatedReplyText = $derived(
 		replyToText ? (replyToText.length > 50 ? replyToText.slice(0, 50) + '...' : replyToText) : null
 	);
@@ -152,7 +176,7 @@
 		{/if}
 
 		<!-- Reaction picker and reply action (appears above the bubble on hover) -->
-		{#if showPicker}
+		{#if showPicker && !editing}
 			<div class="absolute {isSent ? 'right-0' : 'left-0'} bottom-full z-10 mb-1 flex items-center gap-1">
 				<ReactionPicker onReact={handleReact} />
 				<button
@@ -165,6 +189,28 @@
 						<path stroke-linecap="round" stroke-linejoin="round" d="M3 10h10a5 5 0 015 5v4M3 10l6-6M3 10l6 6" />
 					</svg>
 				</button>
+				{#if isSent && !isRetracted}
+					<button
+						onclick={startEdit}
+						class="flex h-8 w-8 items-center justify-center rounded-full bg-white shadow-md transition-colors hover:bg-gray-100 dark:bg-gray-700 dark:hover:bg-gray-600"
+						aria-label="Edit message"
+						title="Edit"
+					>
+						<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 text-gray-600 dark:text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+							<path stroke-linecap="round" stroke-linejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+						</svg>
+					</button>
+					<button
+						onclick={handleUnsend}
+						class="flex h-8 w-8 items-center justify-center rounded-full bg-white shadow-md transition-colors hover:bg-red-100 dark:bg-gray-700 dark:hover:bg-red-900/30"
+						aria-label="Unsend message"
+						title="Unsend"
+					>
+						<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 text-red-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+							<path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+						</svg>
+					</button>
+				{/if}
 			</div>
 		{/if}
 
@@ -185,6 +231,28 @@
 		>
 			{#if isRetracted}
 				<p class="text-sm italic opacity-60">Message unsent</p>
+			{:else if editing}
+				<div class="flex flex-col gap-1.5">
+					<textarea
+						bind:value={editText}
+						class="w-full resize-none rounded-lg bg-white/20 px-2 py-1 text-sm text-inherit outline-none placeholder:text-white/50"
+						rows="2"
+					></textarea>
+					<div class="flex justify-end gap-1">
+						<button
+							onclick={cancelEdit}
+							class="rounded px-2 py-0.5 text-xs opacity-70 transition-opacity hover:opacity-100"
+						>
+							Cancel
+						</button>
+						<button
+							onclick={saveEdit}
+							class="rounded bg-white/20 px-2 py-0.5 text-xs font-medium transition-colors hover:bg-white/30"
+						>
+							Save
+						</button>
+					</div>
+				</div>
 			{:else}
 				{#if attachments.length > 0}
 					<div class="flex flex-col gap-1.5">

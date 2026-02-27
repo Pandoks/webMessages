@@ -252,6 +252,26 @@
 		});
 	}
 
+	async function handleEdit(messageGuid: string, newText: string) {
+		await fetch(`/api/proxy/message/${encodeURIComponent(messageGuid)}/edit`, {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({
+				editedMessage: newText,
+				backwardsCompatibilityMessage: newText,
+				partIndex: 0
+			})
+		});
+	}
+
+	async function handleUnsend(messageGuid: string) {
+		await fetch(`/api/proxy/message/${encodeURIComponent(messageGuid)}/unsend`, {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({ partIndex: 0 })
+		});
+	}
+
 	function handleTypingStart() {
 		fetch(`/api/proxy/chat/${encodeURIComponent(chatGuid)}/typing`, {
 			method: 'POST'
@@ -299,6 +319,8 @@
 				reactions={reactionMap.get(message.guid) ?? []}
 				onReact={handleReact}
 				onReply={handleReplyTo}
+				onEdit={handleEdit}
+				onUnsend={handleUnsend}
 				replyToText={getReplyToText(message)}
 			/>
 		{:else}
