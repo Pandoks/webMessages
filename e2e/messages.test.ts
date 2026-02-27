@@ -31,12 +31,12 @@ test.describe('Messages mode', () => {
 
 	test('messages link is active on messages page', async ({ page }) => {
 		await page.goto('/messages');
-
 		const nav = page.locator('nav');
 		const messagesLink = nav.getByRole('link', { name: 'Messages' });
-
-		// Active link should have the white background / shadow class
-		await expect(messagesLink).toHaveClass(/bg-white|shadow-sm/);
+		const findMyLink = nav.getByRole('link', { name: 'Find My' });
+		await expect(messagesLink).toHaveClass(/bg-white/);
+		await expect(messagesLink).toHaveClass(/shadow-sm/);
+		await expect(findMyLink).not.toHaveClass(/bg-white/);
 	});
 
 	test('navigate from messages to find my via mode toggle', async ({ page }) => {
