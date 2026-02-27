@@ -51,6 +51,13 @@
 			? decodeURIComponent(page.url.pathname.split('/messages/')[1] ?? '')
 			: ''
 	);
+
+	async function handleTogglePin(guid: string) {
+		const chat = await db.chats.get(guid);
+		if (chat) {
+			await db.chats.update(guid, { isPinned: !chat.isPinned });
+		}
+	}
 </script>
 
 <div class="flex h-full flex-col">
@@ -82,6 +89,8 @@
 				lastMessageDate={chat.lastMessageDate}
 				unreadCount={chat.unreadCount}
 				isActive={chat.guid === activeChatGuid}
+				isPinned={chat.isPinned}
+				onTogglePin={handleTogglePin}
 			/>
 		{:else}
 			<p class="p-4 text-center text-sm text-gray-400">No conversations</p>
