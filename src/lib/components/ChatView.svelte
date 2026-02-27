@@ -5,6 +5,7 @@
 	import type { SyncEngine } from '$lib/sync/engine.svelte.js';
 	import MessageBubble from './MessageBubble.svelte';
 	import MessageInput from './MessageInput.svelte';
+	import LocationPanel from './LocationPanel.svelte';
 	import { getChatDisplayName, formatPhoneNumber } from '$lib/utils/format.js';
 
 	interface Props {
@@ -25,6 +26,7 @@
 	let hasMoreOlder = $state(true);
 	let wasNearBottom = $state(true);
 	let replyTo = $state<{ guid: string; text: string | null; senderName: string } | null>(null);
+	let showLocationPanel = $state(false);
 
 	// Subscribe to messages for this chat
 	$effect(() => {
@@ -132,6 +134,8 @@
 	});
 
 	const isGroup = $derived(chat?.style === 43);
+	const is1to1 = $derived(chat?.style === 45);
+	const participantAddress = $derived(is1to1 && chat?.participants?.length ? chat.participants[0] : null);
 
 	const typingAddresses = $derived.by(() => {
 		if (!syncEngine) return [];
@@ -298,47 +302,72 @@
 				{chat.participants.length} members
 			</span>
 		{/if}
+		<div class="ml-auto flex items-center">
+			{#if is1to1 && participantAddress}
+				<button
+					onclick={() => (showLocationPanel = !showLocationPanel)}
+					class="rounded-md p-1.5 text-gray-400 hover:bg-gray-100 hover:text-gray-600 dark:hover:bg-gray-800 dark:hover:text-gray-300"
+					class:text-blue-500={showLocationPanel}
+					class:dark:text-blue-400={showLocationPanel}
+					aria-label="Toggle location panel"
+					title="Show location"
+				>
+					<svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+						<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
+						<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
+					</svg>
+				</button>
+			{/if}
+		</div>
 	</header>
 
-	<!-- Messages -->
-	<div
-		bind:this={scrollContainer}
-		onscroll={handleScroll}
-		class="flex flex-1 flex-col gap-0.5 overflow-y-auto px-4 py-3"
-	>
-		{#if loadingOlder}
-			<div class="py-2 text-center text-xs text-gray-400">Loading older messages...</div>
-		{/if}
+	<!-- Messages + Location Panel -->
+	<div class="flex min-h-0 flex-1">
+		<!-- Messages -->
+		<div
+			bind:this={scrollContainer}
+			onscroll={handleScroll}
+			class="flex flex-1 flex-col gap-0.5 overflow-y-auto px-4 py-3"
+		>
+			{#if loadingOlder}
+				<div class="py-2 text-center text-xs text-gray-400">Loading older messages...</div>
+			{/if}
 
-		{#each messages as message (message.guid)}
-			<MessageBubble
-				{message}
-				attachments={attachmentMap.get(message.guid) ?? []}
-				senderName={getSenderName(message)}
-				showSender={isGroup}
-				reactions={reactionMap.get(message.guid) ?? []}
-				onReact={handleReact}
-				onReply={handleReplyTo}
-				onEdit={handleEdit}
-				onUnsend={handleUnsend}
-				replyToText={getReplyToText(message)}
-			/>
-		{:else}
-			<div class="flex flex-1 items-center justify-center text-sm text-gray-400">
-				No messages yet
-			</div>
-		{/each}
+			{#each messages as message (message.guid)}
+				<MessageBubble
+					{message}
+					attachments={attachmentMap.get(message.guid) ?? []}
+					senderName={getSenderName(message)}
+					showSender={isGroup}
+					reactions={reactionMap.get(message.guid) ?? []}
+					onReact={handleReact}
+					onReply={handleReplyTo}
+					onEdit={handleEdit}
+					onUnsend={handleUnsend}
+					replyToText={getReplyToText(message)}
+				/>
+			{:else}
+				<div class="flex flex-1 items-center justify-center text-sm text-gray-400">
+					No messages yet
+				</div>
+			{/each}
 
-		{#if typingAddresses.length > 0}
-			<div class="mb-1 flex justify-start">
-				<div class="rounded-2xl bg-gray-200 px-3 py-2 dark:bg-gray-700">
-					<div class="flex items-center gap-1">
-						<span class="inline-block h-2 w-2 animate-bounce rounded-full bg-gray-400 [animation-delay:0ms]"></span>
-						<span class="inline-block h-2 w-2 animate-bounce rounded-full bg-gray-400 [animation-delay:150ms]"></span>
-						<span class="inline-block h-2 w-2 animate-bounce rounded-full bg-gray-400 [animation-delay:300ms]"></span>
+			{#if typingAddresses.length > 0}
+				<div class="mb-1 flex justify-start">
+					<div class="rounded-2xl bg-gray-200 px-3 py-2 dark:bg-gray-700">
+						<div class="flex items-center gap-1">
+							<span class="inline-block h-2 w-2 animate-bounce rounded-full bg-gray-400 [animation-delay:0ms]"></span>
+							<span class="inline-block h-2 w-2 animate-bounce rounded-full bg-gray-400 [animation-delay:150ms]"></span>
+							<span class="inline-block h-2 w-2 animate-bounce rounded-full bg-gray-400 [animation-delay:300ms]"></span>
+						</div>
 					</div>
 				</div>
-			</div>
+			{/if}
+		</div>
+
+		<!-- Location Panel -->
+		{#if showLocationPanel && participantAddress}
+			<LocationPanel address={participantAddress} onClose={() => (showLocationPanel = false)} />
 		{/if}
 	</div>
 
