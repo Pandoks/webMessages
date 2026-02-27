@@ -1,18 +1,77 @@
 <script lang="ts">
 	import type { DbMessage, DbAttachment } from '$lib/db/types.js';
+	import ReactionBadge from './ReactionBadge.svelte';
+	import ReactionPicker from './ReactionPicker.svelte';
 
 	interface Props {
 		message: DbMessage;
 		attachments: DbAttachment[];
 		senderName: string;
 		showSender: boolean;
+		reactions: DbMessage[];
+		onReact: (messageGuid: string, reaction: string) => void;
 	}
 
-	let { message, attachments, senderName, showSender }: Props = $props();
+	let { message, attachments, senderName, showSender, reactions, onReact }: Props = $props();
 
 	const isSent = $derived(message.isFromMe);
 	const isRetracted = $derived(message.dateRetracted !== null);
 	const isEdited = $derived(message.dateEdited !== null);
+
+	let showPicker = $state(false);
+	let hoverTimeout: ReturnType<typeof setTimeout> | undefined = $state();
+
+	const reactionTypeToEmoji: Record<number, string> = {
+		2000: '❤️',
+		2001: '👍',
+		2002: '👎',
+		2003: '😂',
+		2004: '‼️',
+		2005: '❓'
+	};
+
+	const aggregatedReactions = $derived.by(() => {
+		// Track active reactions per emoji
+		const active = new Map<string, { count: number; fromMe: boolean }>();
+
+		for (const r of reactions) {
+			const type = r.associatedMessageType;
+
+			// Use emoji reactions if available, otherwise map from type
+			let emoji: string | null = null;
+			if (type >= 2000 && type <= 2005) {
+				emoji = r.associatedMessageEmoji ?? reactionTypeToEmoji[type] ?? null;
+			} else if (type >= 3000 && type <= 3005) {
+				// Removal — find the corresponding emoji
+				const addType = type - 1000;
+				emoji = r.associatedMessageEmoji ?? reactionTypeToEmoji[addType] ?? null;
+			}
+
+			if (!emoji) continue;
+
+			const existing = active.get(emoji) ?? { count: 0, fromMe: false };
+
+			if (type >= 2000 && type <= 2005) {
+				existing.count += 1;
+				if (r.isFromMe) existing.fromMe = true;
+			} else if (type >= 3000 && type <= 3005) {
+				existing.count -= 1;
+				// If the user removed their own reaction, clear fromMe
+				if (r.isFromMe) existing.fromMe = false;
+			}
+
+			active.set(emoji, existing);
+		}
+
+		// Filter out reactions with count <= 0
+		const result: { emoji: string; count: number; fromMe: boolean }[] = [];
+		for (const [emoji, data] of active) {
+			if (data.count > 0) {
+				result.push({ emoji, count: data.count, fromMe: data.fromMe });
+			}
+		}
+		return result;
+	});
 
 	const deliveryStatus = $derived.by(() => {
 		if (!isSent) return null;
@@ -48,14 +107,45 @@
 		const i = Math.floor(Math.log(bytes) / Math.log(k));
 		return `${parseFloat((bytes / Math.pow(k, i)).toFixed(1))} ${sizes[i]}`;
 	}
+
+	function handleMouseEnter() {
+		hoverTimeout = setTimeout(() => {
+			showPicker = true;
+		}, 500);
+	}
+
+	function handleMouseLeave() {
+		if (hoverTimeout) {
+			clearTimeout(hoverTimeout);
+			hoverTimeout = undefined;
+		}
+		showPicker = false;
+	}
+
+	function handleReact(reaction: string) {
+		showPicker = false;
+		onReact(message.guid, reaction);
+	}
 </script>
 
-<div class="flex {isSent ? 'justify-end' : 'justify-start'} mb-1">
+<!-- svelte-ignore a11y_no_static_element_interactions -->
+<div
+	class="group relative flex {isSent ? 'justify-end' : 'justify-start'} mb-1"
+	onmouseenter={handleMouseEnter}
+	onmouseleave={handleMouseLeave}
+>
 	<div class="flex max-w-[75%] flex-col {isSent ? 'items-end' : 'items-start'}">
 		{#if showSender && !isSent}
 			<span class="mb-0.5 px-3 text-xs font-medium text-gray-500 dark:text-gray-400">
 				{senderName}
 			</span>
+		{/if}
+
+		<!-- Reaction picker (appears above the bubble on hover) -->
+		{#if showPicker}
+			<div class="absolute {isSent ? 'right-0' : 'left-0'} bottom-full z-10 mb-1">
+				<ReactionPicker onReact={handleReact} />
+			</div>
 		{/if}
 
 		<div
@@ -136,6 +226,9 @@
 				{/if}
 			{/if}
 		</div>
+
+		<!-- Reaction badges -->
+		<ReactionBadge reactions={aggregatedReactions} />
 
 		<div class="mt-0.5 flex items-center gap-1.5 px-1">
 			<span class="text-[10px] text-gray-400">{messageTime}</span>

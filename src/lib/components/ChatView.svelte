@@ -15,6 +15,7 @@
 	let { chatGuid, syncEngine = null }: Props = $props();
 
 	let messages = $state<DbMessage[]>([]);
+	let reactionMessages = $state<DbMessage[]>([]);
 	let attachmentMap = $state<Map<string, DbAttachment[]>>(new Map());
 	let chat = $state<DbChat | undefined>(undefined);
 	let handles = $state<DbHandle[]>([]);
@@ -36,6 +37,39 @@
 			messages = msgs;
 		});
 		return () => sub.unsubscribe();
+	});
+
+	// Subscribe to reaction messages for this chat
+	$effect(() => {
+		const sub = liveQuery(() =>
+			db.messages
+				.where('chatGuid')
+				.equals(chatGuid)
+				.filter((m) => m.associatedMessageType !== 0)
+				.toArray()
+		).subscribe((msgs) => {
+			reactionMessages = msgs;
+		});
+		return () => sub.unsubscribe();
+	});
+
+	// Build a map of messageGuid -> reaction messages
+	const reactionMap = $derived.by(() => {
+		const map = new Map<string, DbMessage[]>();
+		for (const r of reactionMessages) {
+			if (!r.associatedMessageGuid) continue;
+			// The associatedMessageGuid can have prefixes like "p:0/" or "bp:"
+			// Strip the prefix to get the actual message guid
+			let targetGuid = r.associatedMessageGuid;
+			const slashIndex = targetGuid.indexOf('/');
+			if (slashIndex !== -1) {
+				targetGuid = targetGuid.substring(slashIndex + 1);
+			}
+			const existing = map.get(targetGuid) ?? [];
+			existing.push(r);
+			map.set(targetGuid, existing);
+		}
+		return map;
 	});
 
 	// Subscribe to attachments for messages in this chat
@@ -173,6 +207,19 @@
 		});
 	}
 
+	async function handleReact(messageGuid: string, reaction: string) {
+		await fetch('/api/proxy/message/react', {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({
+				chatGuid,
+				selectedMessageGuid: messageGuid,
+				reaction,
+				partIndex: 0
+			})
+		});
+	}
+
 	function handleTypingStart() {
 		fetch(`/api/proxy/chat/${encodeURIComponent(chatGuid)}/typing`, {
 			method: 'POST'
@@ -217,6 +264,8 @@
 				attachments={attachmentMap.get(message.guid) ?? []}
 				senderName={getSenderName(message)}
 				showSender={isGroup}
+				reactions={reactionMap.get(message.guid) ?? []}
+				onReact={handleReact}
 			/>
 		{:else}
 			<div class="flex flex-1 items-center justify-center text-sm text-gray-400">
