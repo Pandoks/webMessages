@@ -1,7 +1,8 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render } from 'vitest-browser-svelte';
-import { userEvent } from 'vitest/browser';
 import ChatListItem from './ChatListItem.svelte';
+
+const onTogglePin = vi.fn();
 
 const defaultProps = {
 	guid: 'iMessage;-;+11234567890',
@@ -11,10 +12,14 @@ const defaultProps = {
 	unreadCount: 0,
 	isActive: false,
 	isPinned: false,
-	onTogglePin: vi.fn()
+	onTogglePin
 };
 
 describe('ChatListItem', () => {
+	beforeEach(() => {
+		onTogglePin.mockReset();
+	});
+
 	it('renders display name', async () => {
 		const screen = render(ChatListItem, { ...defaultProps });
 		await expect.element(screen.getByText('Alice')).toBeVisible();
