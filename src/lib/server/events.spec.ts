@@ -80,9 +80,10 @@ describe('EventBroadcaster', () => {
 		expect(sse).toMatch(/\ndata: /);
 		expect(sse).toMatch(/\n\n$/);
 
-		const dataLine = sse.split('\n')[1];
-		const jsonPayload = dataLine.replace('data: ', '');
-		const parsed = JSON.parse(jsonPayload);
+		const lines = sse.split('\n');
+		const dataLine = lines.find(l => l.startsWith('data: '));
+		expect(dataLine).toBeDefined();
+		const parsed = JSON.parse(dataLine!.slice('data: '.length));
 		expect(parsed).toEqual({ chatGuid: 'chat-1', display: true });
 	});
 

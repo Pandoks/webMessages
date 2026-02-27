@@ -3,14 +3,13 @@ import { ImessageClient } from './imessage-rs.js';
 
 describe('ImessageClient', () => {
 	let client: ImessageClient;
-	const originalFetch = global.fetch;
 
 	beforeEach(() => {
 		client = new ImessageClient('http://localhost:1234', 'test-password');
 	});
 
 	afterEach(() => {
-		global.fetch = originalFetch;
+		vi.restoreAllMocks();
 	});
 
 	it('constructs correct URL with password', () => {
@@ -25,10 +24,9 @@ describe('ImessageClient', () => {
 	});
 
 	it('fetches with correct headers', async () => {
-		const mockFetch = vi.fn().mockResolvedValue(
+		const mockFetch = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
 			new Response(JSON.stringify({ status: 200, message: 'Success', data: 'pong' }))
 		);
-		global.fetch = mockFetch;
 
 		await client.get('/api/v1/ping');
 
@@ -49,11 +47,6 @@ describe('ImessageClient', () => {
 	});
 
 	it('handles GUIDs with special characters in URL path', () => {
-		const mockFetch = vi.fn().mockResolvedValue(
-			new Response(JSON.stringify({ status: 200, message: 'Success', data: {} }))
-		);
-		global.fetch = mockFetch;
-
 		const guid = 'iMessage;-;+1234567890';
 		const url = client.buildUrl(`/api/v1/chat/${encodeURIComponent(guid)}`);
 
@@ -62,10 +55,9 @@ describe('ImessageClient', () => {
 	});
 
 	it('POST sends correct body and Content-Type', async () => {
-		const mockFetch = vi.fn().mockResolvedValue(
+		const mockFetch = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
 			new Response(JSON.stringify({ status: 200, message: 'Success', data: {} }))
 		);
-		global.fetch = mockFetch;
 
 		const body = { chatGuid: 'iMessage;-;+1234567890', message: 'Hello world', method: 'private-api' };
 		await client.post('/api/v1/message/text', body);
@@ -81,10 +73,9 @@ describe('ImessageClient', () => {
 	});
 
 	it('POST without body sends undefined body', async () => {
-		const mockFetch = vi.fn().mockResolvedValue(
+		const mockFetch = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
 			new Response(JSON.stringify({ status: 200, message: 'Success', data: null }))
 		);
-		global.fetch = mockFetch;
 
 		await client.post('/api/v1/chat/some-chat/read');
 
@@ -99,7 +90,7 @@ describe('ImessageClient', () => {
 
 	it('returns parsed JSON response from get', async () => {
 		const responseData = { status: 200, message: 'Success', data: 'pong' };
-		global.fetch = vi.fn().mockResolvedValue(
+		vi.spyOn(globalThis, 'fetch').mockResolvedValue(
 			new Response(JSON.stringify(responseData))
 		);
 
@@ -108,7 +99,7 @@ describe('ImessageClient', () => {
 	});
 
 	it('propagates fetch errors', async () => {
-		global.fetch = vi.fn().mockRejectedValue(new Error('Network error'));
+		vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('Network error'));
 
 		await expect(client.get('/api/v1/ping')).rejects.toThrow('Network error');
 	});
