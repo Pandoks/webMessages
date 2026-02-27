@@ -1,0 +1,30 @@
+services:
+  web:
+    build: .
+    environment:
+      - IMESSAGE_RS_URL=http://host.docker.internal:1234
+      - IMESSAGE_RS_PASSWORD=${IMESSAGE_RS_PASSWORD}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    network_mode: service:tailscale
+    depends_on:
+      - tailscale
+    restart: unless-stopped
+
+  tailscale:
+    image: tailscale/tailscale:latest
+    hostname: webmessages
+    environment:
+      - TS_AUTHKEY=${TS_AUTHKEY}
+      - TS_STATE_DIR=/var/lib/tailscale
+      - TS_SERVE_CONFIG=/config/serve.json
+    volumes:
+      - ./tailscale-config:/config:ro
+      - ts-state:/var/lib/tailscale
+    cap_add:
+      - NET_ADMIN
+      - SYS_MODULE
+    restart: unless-stopped
+
+volumes:
+  ts-state:
