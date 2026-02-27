@@ -1,10 +1,17 @@
 <script lang="ts">
 	import './layout.css';
 	import { onMount, setContext } from 'svelte';
+	import { page } from '$app/state';
 	import ModeToggle from '$lib/components/ModeToggle.svelte';
 	import { syncEngine } from '$lib/stores/sync.js';
+	import faviconMessages from '$lib/assets/favicon-messages.svg';
+	import faviconFindmy from '$lib/assets/favicon-findmy.svg';
 
 	let { children } = $props();
+
+	let favicon = $derived(
+		page.url.pathname.startsWith('/findmy') ? faviconFindmy : faviconMessages
+	);
 
 	setContext('syncEngine', syncEngine);
 
@@ -16,6 +23,7 @@
 
 <svelte:head>
 	<title>webMessages</title>
+	<link rel="icon" type="image/svg+xml" href={favicon} />
 </svelte:head>
 
 <div class="flex h-screen flex-col bg-white dark:bg-gray-900">
