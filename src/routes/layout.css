@@ -1,2 +1,15 @@
 @import 'tailwindcss';
 @plugin '@tailwindcss/typography';
+
+html,
+body {
+	height: 100%;
+	margin: 0;
+	overflow: hidden;
+}
+
+@media (prefers-color-scheme: dark) {
+	:root {
+		color-scheme: dark;
+	}
+}
