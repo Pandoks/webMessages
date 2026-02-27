@@ -24,6 +24,7 @@
 	let loadingOlder = $state(false);
 	let hasMoreOlder = $state(true);
 	let wasNearBottom = $state(true);
+	let replyTo = $state<{ guid: string; text: string | null; senderName: string } | null>(null);
 
 	// Subscribe to messages for this chat
 	$effect(() => {
@@ -117,6 +118,12 @@
 		}
 	});
 
+	// Clear reply when switching chats
+	$effect(() => {
+		void chatGuid;
+		replyTo = null;
+	});
+
 	const handleMap = $derived(new Map(handles.map((h) => [h.address, h.displayName])));
 
 	const displayName = $derived.by(() => {
@@ -139,6 +146,26 @@
 			return name ?? formatPhoneNumber(message.handleAddress);
 		}
 		return 'Unknown';
+	}
+
+	// Map of message guid -> message text for resolving reply previews
+	const messageTextMap = $derived(new Map(messages.map((m) => [m.guid, m.text])));
+
+	function getReplyToText(message: DbMessage): string | null {
+		if (!message.threadOriginatorGuid) return null;
+		return messageTextMap.get(message.threadOriginatorGuid) ?? null;
+	}
+
+	function handleReplyTo(message: DbMessage) {
+		replyTo = {
+			guid: message.guid,
+			text: message.text,
+			senderName: getSenderName(message)
+		};
+	}
+
+	function handleCancelReply() {
+		replyTo = null;
 	}
 
 	// Auto-scroll to bottom on new messages (only if already near bottom)
@@ -196,15 +223,20 @@
 	}
 
 	async function handleSend(text: string) {
+		const body: Record<string, string> = {
+			chatGuid,
+			message: text,
+			method: 'apple-script'
+		};
+		if (replyTo) {
+			body.selectedMessageGuid = replyTo.guid;
+		}
 		await fetch('/api/proxy/message/text', {
 			method: 'POST',
 			headers: { 'Content-Type': 'application/json' },
-			body: JSON.stringify({
-				chatGuid,
-				message: text,
-				method: 'apple-script'
-			})
+			body: JSON.stringify(body)
 		});
+		replyTo = null;
 	}
 
 	async function handleReact(messageGuid: string, reaction: string) {
@@ -266,6 +298,8 @@
 				showSender={isGroup}
 				reactions={reactionMap.get(message.guid) ?? []}
 				onReact={handleReact}
+				onReply={handleReplyTo}
+				replyToText={getReplyToText(message)}
 			/>
 		{:else}
 			<div class="flex flex-1 items-center justify-center text-sm text-gray-400">
@@ -292,5 +326,7 @@
 		onSend={handleSend}
 		onTypingStart={handleTypingStart}
 		onTypingStop={handleTypingStop}
+		{replyTo}
+		onCancelReply={handleCancelReply}
 	/>
 </div>

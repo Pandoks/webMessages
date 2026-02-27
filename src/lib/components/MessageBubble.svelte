@@ -10,9 +10,11 @@
 		showSender: boolean;
 		reactions: DbMessage[];
 		onReact: (messageGuid: string, reaction: string) => void;
+		onReply: (message: DbMessage) => void;
+		replyToText: string | null;
 	}
 
-	let { message, attachments, senderName, showSender, reactions, onReact }: Props = $props();
+	let { message, attachments, senderName, showSender, reactions, onReact, onReply, replyToText }: Props = $props();
 
 	const isSent = $derived(message.isFromMe);
 	const isRetracted = $derived(message.dateRetracted !== null);
@@ -126,6 +128,14 @@
 		showPicker = false;
 		onReact(message.guid, reaction);
 	}
+
+	function handleReply() {
+		onReply(message);
+	}
+
+	const truncatedReplyText = $derived(
+		replyToText ? (replyToText.length > 50 ? replyToText.slice(0, 50) + '...' : replyToText) : null
+	);
 </script>
 
 <!-- svelte-ignore a11y_no_static_element_interactions -->
@@ -141,10 +151,30 @@
 			</span>
 		{/if}
 
-		<!-- Reaction picker (appears above the bubble on hover) -->
+		<!-- Reaction picker and reply action (appears above the bubble on hover) -->
 		{#if showPicker}
-			<div class="absolute {isSent ? 'right-0' : 'left-0'} bottom-full z-10 mb-1">
+			<div class="absolute {isSent ? 'right-0' : 'left-0'} bottom-full z-10 mb-1 flex items-center gap-1">
 				<ReactionPicker onReact={handleReact} />
+				<button
+					onclick={handleReply}
+					class="flex h-8 w-8 items-center justify-center rounded-full bg-white shadow-md transition-colors hover:bg-gray-100 dark:bg-gray-700 dark:hover:bg-gray-600"
+					aria-label="Reply to message"
+					title="Reply"
+				>
+					<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 text-gray-600 dark:text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+						<path stroke-linecap="round" stroke-linejoin="round" d="M3 10h10a5 5 0 015 5v4M3 10l6-6M3 10l6 6" />
+					</svg>
+				</button>
+			</div>
+		{/if}
+
+		<!-- Reply-to preview -->
+		{#if message.threadOriginatorGuid && truncatedReplyText}
+			<div class="mb-1 flex items-start gap-1.5 px-1">
+				<div class="w-0.5 shrink-0 self-stretch rounded-full {isSent ? 'bg-blue-300' : 'bg-gray-400 dark:bg-gray-500'}"></div>
+				<p class="truncate text-xs italic {isSent ? 'text-blue-200' : 'text-gray-500 dark:text-gray-400'}">
+					{truncatedReplyText}
+				</p>
 			</div>
 		{/if}
 
