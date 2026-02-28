@@ -1,5 +1,6 @@
 @import 'tailwindcss';
 @plugin '@tailwindcss/typography';
+@custom-variant dark (&:where(.dark, .dark *));
 
 html,
 body {
@@ -8,8 +9,6 @@ body {
 	overflow: hidden;
 }
 
-@media (prefers-color-scheme: dark) {
-	:root {
-		color-scheme: dark;
-	}
+html.dark {
+	color-scheme: dark;
 }

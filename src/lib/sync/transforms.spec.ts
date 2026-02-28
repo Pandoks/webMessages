@@ -106,6 +106,40 @@ describe('transforms', () => {
 		expect(db.attachmentGuids).toEqual(['att-1']);
 	});
 
+	it('uses chatGuidOverride when provided', () => {
+		const msg = {
+			guid: 'msg-override',
+			handle: null,
+			chats: [{ guid: 'iMessage;-;+1234567890' } as Chat],
+			attachments: [],
+			text: 'Override test', handleId: 0, isFromMe: true, dateCreated: 0, dateRead: null,
+			dateDelivered: null, dateEdited: null, dateRetracted: null, subject: null,
+			associatedMessageGuid: null, associatedMessageType: 0, associatedMessageEmoji: null,
+			threadOriginatorGuid: null, error: 0, expressiveSendStyleId: null, isDelivered: true,
+			groupTitle: null, groupActionType: 0, isSystemMessage: false, itemType: 0
+		} as Message;
+
+		const db = messageToDb(msg, 'iMessage;-;+9999999999');
+		expect(db.chatGuid).toBe('iMessage;-;+9999999999');
+	});
+
+	it('uses chatGuidOverride when chats is empty', () => {
+		const msg = {
+			guid: 'msg-override-empty',
+			handle: null,
+			chats: undefined as unknown as Chat[],
+			attachments: [],
+			text: 'No chats', handleId: 0, isFromMe: true, dateCreated: 0, dateRead: null,
+			dateDelivered: null, dateEdited: null, dateRetracted: null, subject: null,
+			associatedMessageGuid: null, associatedMessageType: 0, associatedMessageEmoji: null,
+			threadOriginatorGuid: null, error: 0, expressiveSendStyleId: null, isDelivered: true,
+			groupTitle: null, groupActionType: 0, isSystemMessage: false, itemType: 0
+		} as Message;
+
+		const db = messageToDb(msg, 'iMessage;-;+5555555555');
+		expect(db.chatGuid).toBe('iMessage;-;+5555555555');
+	});
+
 	it('handles message with no chats', () => {
 		const msg = {
 			guid: 'msg-no-chats',

@@ -41,6 +41,9 @@ class FindMyStore {
 	async fetchDevices() {
 		try {
 			const res = await fetch('/api/proxy/icloud/findmy/devices');
+			if (!res.ok) {
+				throw new Error(`Failed to fetch devices: ${res.status} ${res.statusText}`);
+			}
 			const data = await res.json();
 			this.devices = data.data ?? [];
 		} catch (e) {
@@ -51,6 +54,9 @@ class FindMyStore {
 	async fetchFriends() {
 		try {
 			const res = await fetch('/api/proxy/icloud/findmy/friends');
+			if (!res.ok) {
+				throw new Error(`Failed to fetch friends: ${res.status} ${res.statusText}`);
+			}
 			const data = await res.json();
 			this.friends = data.data ?? [];
 		} catch (e) {

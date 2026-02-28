@@ -30,14 +30,84 @@
 	});
 
 	const handleMap = $derived(new Map(allHandles.map((h) => [h.address, h.displayName])));
+	const avatarMap = $derived(new Map(allHandles.map((h) => [h.address, h.avatarBase64])));
+
+	// Deduplicate chats:
+	// - Group chats (style 43): by sorted participant set
+	// - 1:1 chats (style 45): by resolved contact name (merges phone + email for same person)
+	const deduplicatedChats = $derived.by(() => {
+		const seen = new Map<string, DbChat>();
+		const result: DbChat[] = [];
+
+		for (const chat of allChats) {
+			if (chat.style === 43 && chat.participants.length > 0) {
+				// Group chat: deduplicate by sorted participant set
+				const key = [...chat.participants].sort().join(',');
+				const existing = seen.get(key);
+				if (existing) {
+					if (chat.lastMessageDate > existing.lastMessageDate) {
+						result[result.indexOf(existing)] = chat;
+						seen.set(key, chat);
+					}
+					continue;
+				}
+				seen.set(key, chat);
+			} else if (chat.style === 45 && chat.participants.length === 1) {
+				// 1:1 chat: deduplicate by resolved contact name
+				const name = handleMap.get(chat.participants[0]);
+				if (name) {
+					const key = `1:1:${name}`;
+					const existing = seen.get(key);
+					if (existing) {
+						if (chat.lastMessageDate > existing.lastMessageDate) {
+							result[result.indexOf(existing)] = chat;
+							seen.set(key, chat);
+						}
+						continue;
+					}
+					seen.set(key, chat);
+				}
+			}
+			result.push(chat);
+		}
+
+		return result;
+	});
+
+	// Map of chatGuid -> all sibling chatGuids (for merged 1:1 contacts)
+	const siblingGuidsMap = $derived.by(() => {
+		// Group 1:1 chats by resolved contact name
+		const nameToGuids = new Map<string, string[]>();
+		for (const chat of allChats) {
+			if (chat.style === 45 && chat.participants.length === 1) {
+				const name = handleMap.get(chat.participants[0]);
+				if (name) {
+					const guids = nameToGuids.get(name) ?? [];
+					guids.push(chat.guid);
+					nameToGuids.set(name, guids);
+				}
+			}
+		}
+
+		// Build guid -> allGuids map (only for contacts with multiple chats)
+		const map = new Map<string, string[]>();
+		for (const guids of nameToGuids.values()) {
+			if (guids.length > 1) {
+				for (const guid of guids) {
+					map.set(guid, guids);
+				}
+			}
+		}
+		return map;
+	});
 
 	const sortedChats = $derived.by(() => {
 		const filtered = search
-			? allChats.filter((c) => {
+			? deduplicatedChats.filter((c) => {
 					const name = getChatDisplayName(c.displayName, c.participants, handleMap);
 					return name.toLowerCase().includes(search.toLowerCase());
 				})
-			: allChats;
+			: deduplicatedChats;
 
 		return [...filtered].sort((a, b) => {
 			if (a.isPinned && !b.isPinned) return -1;
@@ -46,18 +116,22 @@
 		});
 	});
 
+	const pinnedChats = $derived(sortedChats.filter((c) => c.isPinned));
+	const regularChats = $derived(sortedChats.filter((c) => !c.isPinned));
+
 	const activeChatGuid = $derived(
 		page.url.pathname.startsWith('/messages/')
 			? decodeURIComponent(page.url.pathname.split('/messages/')[1] ?? '')
 			: ''
 	);
 
-	async function handleTogglePin(guid: string) {
-		const chat = await db.chats.get(guid);
-		if (chat) {
-			await db.chats.update(guid, { isPinned: !chat.isPinned });
-		}
+	// Check if a chat (or any of its siblings) is the active one
+	function isChatActive(guid: string): boolean {
+		if (guid === activeChatGuid) return true;
+		const siblings = siblingGuidsMap.get(guid);
+		return siblings?.includes(activeChatGuid) ?? false;
 	}
+
 </script>
 
 <div class="flex h-full flex-col">
@@ -80,17 +154,48 @@
 			</button>
 		</div>
 	</div>
+	<!-- Pinned chats: sticky at top, always visible -->
+	{#if pinnedChats.length > 0}
+		<div class="shrink-0 border-b border-gray-200 dark:border-gray-700">
+			{#each pinnedChats as chat (chat.guid)}
+				{@const chatParticipants = chat.participants.map((addr) => {
+					const name = handleMap.get(addr) || addr;
+					const raw = avatarMap.get(addr);
+					const mime = raw?.startsWith('iVBOR') ? 'image/png' : 'image/jpeg';
+					return { name, avatar: raw ? `data:${mime};base64,${raw}` : null };
+				})}
+				<ChatListItem
+					guid={chat.guid}
+					displayName={getChatDisplayName(chat.displayName, chat.participants, handleMap)}
+					lastMessage={chat.lastMessageText}
+					lastMessageDate={chat.lastMessageDate}
+					unreadCount={chat.unreadCount}
+					isActive={isChatActive(chat.guid)}
+					isPinned={chat.isPinned}
+					participants={chatParticipants}
+				/>
+			{/each}
+		</div>
+	{/if}
+
+	<!-- Regular chats: scrollable -->
 	<div class="flex-1 overflow-y-auto">
-		{#each sortedChats as chat (chat.guid)}
+		{#each regularChats as chat (chat.guid)}
+			{@const chatParticipants = chat.participants.map((addr) => {
+				const name = handleMap.get(addr) || addr;
+				const raw = avatarMap.get(addr);
+				const mime = raw?.startsWith('iVBOR') ? 'image/png' : 'image/jpeg';
+				return { name, avatar: raw ? `data:${mime};base64,${raw}` : null };
+			})}
 			<ChatListItem
 				guid={chat.guid}
 				displayName={getChatDisplayName(chat.displayName, chat.participants, handleMap)}
 				lastMessage={chat.lastMessageText}
 				lastMessageDate={chat.lastMessageDate}
 				unreadCount={chat.unreadCount}
-				isActive={chat.guid === activeChatGuid}
-				isPinned={chat.isPinned}
-				onTogglePin={handleTogglePin}
+				isActive={isChatActive(chat.guid)}
+				isPinned={false}
+				participants={chatParticipants}
 			/>
 		{:else}
 			<p class="p-4 text-center text-sm text-gray-400">No conversations</p>

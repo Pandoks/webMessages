@@ -31,6 +31,6 @@ export function getChatDisplayName(
 	if (displayName) return displayName;
 	if (participants.length === 0) return 'Unknown';
 	return participants
-		.map((addr) => handles.get(addr) ?? formatPhoneNumber(addr))
+		.map((addr) => handles.get(addr) || formatPhoneNumber(addr))
 		.join(', ');
 }

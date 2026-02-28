@@ -44,15 +44,20 @@
 			onSelect={(id) => (selectedId = id)}
 		/>
 		{#if findMyStore.loading}
-			<div class="absolute inset-0 flex items-center justify-center bg-black/10">
+			<div class="absolute inset-0 z-[500] flex items-center justify-center bg-black/10">
 				<div class="rounded-lg bg-white px-4 py-2 text-sm shadow-lg dark:bg-gray-800 dark:text-white">
 					Loading locations...
 				</div>
 			</div>
 		{/if}
 		{#if findMyStore.error}
-			<div class="absolute bottom-4 left-4 rounded-lg bg-red-500 px-4 py-2 text-sm text-white shadow-lg">
-				{findMyStore.error}
+			<div class="absolute bottom-4 left-4 z-[500] flex items-center gap-2 rounded-lg bg-red-500 px-4 py-2 text-sm text-white shadow-lg">
+				<span>{findMyStore.error}</span>
+				<button
+					onclick={() => (findMyStore.error = null)}
+					class="ml-1 font-bold hover:text-red-200"
+					aria-label="Dismiss error"
+				>&times;</button>
 			</div>
 		{/if}
 	</div>

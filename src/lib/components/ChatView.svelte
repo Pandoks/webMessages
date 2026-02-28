@@ -23,17 +23,63 @@
 
 	let scrollContainer: HTMLDivElement | undefined = $state();
 	let loadingOlder = $state(false);
+	let loadingMessages = $state(false);
 	let hasMoreOlder = $state(true);
 	let wasNearBottom = $state(true);
 	let replyTo = $state<{ guid: string; text: string | null; senderName: string } | null>(null);
 	let showLocationPanel = $state(false);
+	let showScheduled = $state(false);
 
-	// Subscribe to messages for this chat
+	// Find sibling chat GUIDs (same contact, different address e.g. phone + email)
+	let allChatGuids = $state<string[]>([chatGuid]);
+
 	$effect(() => {
+		// Reset to just the primary guid when chat changes
+		allChatGuids = [chatGuid];
+
+		// Look up siblings: find other 1:1 chats whose participant resolves to same name
+		(async () => {
+			const thisChat = await db.chats.get(chatGuid);
+			if (!thisChat || thisChat.style !== 45 || thisChat.participants.length !== 1) return;
+
+			const handle = await db.handles.get(thisChat.participants[0]);
+			if (!handle?.displayName) return;
+
+			const contactName = handle.displayName;
+			const allChats = await db.chats.filter((c) => c.style === 45).toArray();
+			const guids: string[] = [];
+
+			for (const c of allChats) {
+				if (c.participants.length !== 1) continue;
+				const h = await db.handles.get(c.participants[0]);
+				if (h?.displayName === contactName) {
+					guids.push(c.guid);
+				}
+			}
+
+			if (guids.length > 1) {
+				allChatGuids = guids;
+			}
+		})();
+	});
+
+	// Lazy-load messages when a chat is opened
+	$effect(() => {
+		if (!syncEngine) return;
+		loadingMessages = true;
+		// Ensure messages for all sibling chats
+		Promise.all(allChatGuids.map((g) => syncEngine!.ensureChatMessages(g))).finally(() => {
+			loadingMessages = false;
+		});
+	});
+
+	// Subscribe to messages for this chat (and siblings)
+	$effect(() => {
+		const guids = allChatGuids;
 		const sub = liveQuery(() =>
 			db.messages
 				.where('chatGuid')
-				.equals(chatGuid)
+				.anyOf(guids)
 				.filter((m) => m.associatedMessageType === 0)
 				.sortBy('dateCreated')
 		).subscribe((msgs) => {
@@ -42,12 +88,13 @@
 		return () => sub.unsubscribe();
 	});
 
-	// Subscribe to reaction messages for this chat
+	// Subscribe to reaction messages for this chat (and siblings)
 	$effect(() => {
+		const guids = allChatGuids;
 		const sub = liveQuery(() =>
 			db.messages
 				.where('chatGuid')
-				.equals(chatGuid)
+				.anyOf(guids)
 				.filter((m) => m.associatedMessageType !== 0)
 				.toArray()
 		).subscribe((msgs) => {
@@ -126,6 +173,9 @@
 		replyTo = null;
 	});
 
+	const regularMessages = $derived(messages.filter((m) => m.dateCreated <= Date.now()));
+	const scheduledMessages = $derived(messages.filter((m) => m.dateCreated > Date.now()));
+
 	const handleMap = $derived(new Map(handles.map((h) => [h.address, h.displayName])));
 
 	const displayName = $derived.by(() => {
@@ -175,7 +225,7 @@
 	// Auto-scroll to bottom on new messages (only if already near bottom)
 	$effect(() => {
 		// Track messages length to trigger effect on new messages
-		void messages.length;
+		void regularMessages.length;
 
 		if (wasNearBottom && scrollContainer) {
 			// Use tick-like delay to ensure DOM is updated
@@ -196,20 +246,24 @@
 		wasNearBottom = scrollHeight - scrollTop - clientHeight < 100;
 
 		// Load older messages when scrolled near top
-		if (scrollTop < 50 && !loadingOlder && hasMoreOlder && messages.length > 0) {
+		if (scrollTop < 50 && !loadingOlder && hasMoreOlder && regularMessages.length > 0) {
 			loadOlderMessages();
 		}
 	}
 
 	async function loadOlderMessages() {
-		if (!syncEngine || loadingOlder || messages.length === 0) return;
+		if (!syncEngine || loadingOlder || regularMessages.length === 0) return;
 
 		loadingOlder = true;
 		const prevScrollHeight = scrollContainer?.scrollHeight ?? 0;
 
 		try {
-			const oldestDate = messages[0].dateCreated;
-			const count = await syncEngine.loadOlderMessages(chatGuid, oldestDate);
+			const oldestDate = regularMessages[0].dateCreated;
+			// Load older messages from all sibling chats
+			const counts = await Promise.all(
+				allChatGuids.map((g) => syncEngine!.loadOlderMessages(g, oldestDate))
+			);
+			const count = counts.reduce((a, b) => a + b, 0);
 			if (count === 0) {
 				hasMoreOlder = false;
 			}
@@ -227,24 +281,139 @@
 	}
 
 	async function handleSend(text: string) {
+		const tempGuid = crypto.randomUUID();
 		const body: Record<string, string> = {
 			chatGuid,
 			message: text,
-			method: 'apple-script'
+			method: 'apple-script',
+			tempGuid
 		};
 		if (replyTo) {
 			body.selectedMessageGuid = replyTo.guid;
 		}
-		await fetch('/api/proxy/message/text', {
+		const res = await fetch('/api/proxy/message/text', {
 			method: 'POST',
 			headers: { 'Content-Type': 'application/json' },
 			body: JSON.stringify(body)
 		});
+		if (res.ok) {
+			const { data } = await res.json();
+			const now = data?.dateCreated ?? Date.now();
+			const msgGuid = data?.guid ?? tempGuid;
+			// Store the sent message locally so it appears immediately
+			await db.messages.put({
+				guid: msgGuid,
+				chatGuid,
+				text,
+				handleId: 0,
+				handleAddress: null,
+				isFromMe: true,
+				dateCreated: now,
+				dateRead: null,
+				dateDelivered: null,
+				dateEdited: null,
+				dateRetracted: null,
+				subject: null,
+				associatedMessageGuid: null,
+				associatedMessageType: 0,
+				associatedMessageEmoji: null,
+				threadOriginatorGuid: replyTo?.guid ?? null,
+				attachmentGuids: [],
+				error: 0,
+				expressiveSendStyleId: null,
+				isDelivered: false,
+				groupTitle: null,
+				groupActionType: 0,
+				isSystemMessage: false,
+				itemType: 0
+			});
+			// Update chat's last message
+			await db.chats.update(chatGuid, {
+				lastMessageDate: now,
+				lastMessageText: text
+			});
+		}
+		replyTo = null;
+	}
+
+	async function handleSendAttachment(files: File[], text: string, replyToGuid: string | null) {
+		for (let i = 0; i < files.length; i++) {
+			const tempGuid = crypto.randomUUID();
+			const formData = new FormData();
+			formData.append('chatGuid', chatGuid);
+			formData.append('method', 'apple-script');
+			formData.append('tempGuid', tempGuid);
+			if (i === 0 && text) formData.append('message', text);
+			if (i === 0 && replyToGuid) formData.append('selectedMessageGuid', replyToGuid);
+			formData.append('attachment', files[i]);
+
+			const res = await fetch('/api/proxy/message/attachment', {
+				method: 'POST',
+				body: formData
+			});
+			if (res.ok) {
+				const { data } = await res.json();
+				const now = data?.dateCreated ?? Date.now();
+				const msgGuid = data?.guid ?? crypto.randomUUID();
+
+				// Store message in IndexedDB so it appears immediately
+				await db.messages.put({
+					guid: msgGuid,
+					chatGuid,
+					text: (i === 0 && text) ? text : '\ufffc',
+					handleId: 0,
+					handleAddress: null,
+					isFromMe: true,
+					dateCreated: now,
+					dateRead: null,
+					dateDelivered: null,
+					dateEdited: null,
+					dateRetracted: null,
+					subject: null,
+					associatedMessageGuid: null,
+					associatedMessageType: 0,
+					associatedMessageEmoji: null,
+					threadOriginatorGuid: (i === 0 && replyToGuid) ? replyToGuid : null,
+					attachmentGuids: data?.attachments?.map((a: { guid: string }) => a.guid) ?? [],
+					error: 0,
+					expressiveSendStyleId: null,
+					isDelivered: data?.isDelivered ?? false,
+					groupTitle: null,
+					groupActionType: 0,
+					isSystemMessage: false,
+					itemType: 0
+				});
+
+				// Store attachment metadata so it renders inline
+				if (data?.attachments) {
+					for (const att of data.attachments) {
+						await db.attachments.put({
+							guid: att.guid,
+							messageGuid: msgGuid,
+							mimeType: att.mimeType ?? files[i].type ?? null,
+							transferName: att.transferName ?? files[i].name,
+							totalBytes: att.totalBytes ?? files[i].size,
+							width: att.width ?? null,
+							height: att.height ?? null,
+							hasLivePhoto: att.hasLivePhoto ?? false,
+							blurhash: att.blurhash ?? null,
+							isSticker: att.isSticker ?? false
+						});
+					}
+				}
+
+				// Update chat's last message
+				await db.chats.update(chatGuid, {
+					lastMessageDate: now,
+					lastMessageText: text || files[i].name
+				});
+			}
+		}
 		replyTo = null;
 	}
 
 	async function handleReact(messageGuid: string, reaction: string) {
-		await fetch('/api/proxy/message/react', {
+		const res = await fetch('/api/proxy/message/react', {
 			method: 'POST',
 			headers: { 'Content-Type': 'application/json' },
 			body: JSON.stringify({
@@ -254,10 +423,48 @@
 				partIndex: 0
 			})
 		});
+		if (res.ok) {
+			// Store reaction locally so it appears immediately
+			const reactionGuid = crypto.randomUUID();
+			await db.messages.put({
+				guid: reactionGuid,
+				chatGuid,
+				text: reaction,
+				handleId: 0,
+				handleAddress: null,
+				isFromMe: true,
+				dateCreated: Date.now(),
+				dateRead: null,
+				dateDelivered: null,
+				dateEdited: null,
+				dateRetracted: null,
+				subject: null,
+				associatedMessageGuid: `p:0/${messageGuid}`,
+				associatedMessageType: reactionTypeForEmoji(reaction),
+				associatedMessageEmoji: reaction,
+				threadOriginatorGuid: null,
+				attachmentGuids: [],
+				error: 0,
+				expressiveSendStyleId: null,
+				isDelivered: false,
+				groupTitle: null,
+				groupActionType: 0,
+				isSystemMessage: false,
+				itemType: 0
+			});
+		}
+	}
+
+	function reactionTypeForEmoji(reaction: string): number {
+		const map: Record<string, number> = {
+			love: 2000, like: 2001, dislike: 2002,
+			laugh: 2003, emphasize: 2004, question: 2005
+		};
+		return map[reaction] ?? 2000;
 	}
 
 	async function handleEdit(messageGuid: string, newText: string) {
-		await fetch(`/api/proxy/message/${encodeURIComponent(messageGuid)}/edit`, {
+		const res = await fetch(`/api/proxy/message/${encodeURIComponent(messageGuid)}/edit`, {
 			method: 'POST',
 			headers: { 'Content-Type': 'application/json' },
 			body: JSON.stringify({
@@ -266,14 +473,26 @@
 				partIndex: 0
 			})
 		});
+		if (res.ok) {
+			await db.messages.update(messageGuid, {
+				text: newText,
+				dateEdited: Date.now()
+			});
+		}
 	}
 
 	async function handleUnsend(messageGuid: string) {
-		await fetch(`/api/proxy/message/${encodeURIComponent(messageGuid)}/unsend`, {
+		const res = await fetch(`/api/proxy/message/${encodeURIComponent(messageGuid)}/unsend`, {
 			method: 'POST',
 			headers: { 'Content-Type': 'application/json' },
 			body: JSON.stringify({ partIndex: 0 })
 		});
+		if (res.ok) {
+			await db.messages.update(messageGuid, {
+				text: null,
+				dateRetracted: Date.now()
+			});
+		}
 	}
 
 	function handleTypingStart() {
@@ -302,7 +521,7 @@
 				{chat.participants.length} members
 			</span>
 		{/if}
-		<div class="ml-auto flex items-center">
+		<div class="ml-auto flex items-center gap-1">
 			{#if is1to1 && participantAddress}
 				<button
 					onclick={() => (showLocationPanel = !showLocationPanel)}
@@ -333,7 +552,7 @@
 				<div class="py-2 text-center text-xs text-gray-400">Loading older messages...</div>
 			{/if}
 
-			{#each messages as message (message.guid)}
+			{#each regularMessages as message (message.guid)}
 				<MessageBubble
 					{message}
 					attachments={attachmentMap.get(message.guid) ?? []}
@@ -348,9 +567,53 @@
 				/>
 			{:else}
 				<div class="flex flex-1 items-center justify-center text-sm text-gray-400">
-					No messages yet
+					{#if loadingMessages}Loading messages...{:else}No messages yet{/if}
 				</div>
 			{/each}
+
+			<!-- Collapsible Scheduled Messages section -->
+			{#if scheduledMessages.length > 0}
+				<!-- svelte-ignore a11y_no_static_element_interactions -->
+				<div class="my-3 flex items-center gap-3" onclick={() => (showScheduled = !showScheduled)}>
+					<div class="h-px flex-1 bg-blue-300 dark:bg-blue-700"></div>
+					<button
+						class="flex items-center gap-1.5 rounded-full border border-blue-300 px-3 py-1 text-xs font-medium text-blue-500 transition-colors hover:bg-blue-50 dark:border-blue-700 dark:text-blue-400 dark:hover:bg-blue-900/20"
+					>
+						<svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+							<path stroke-linecap="round" stroke-linejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+						</svg>
+						Scheduled Messages ({scheduledMessages.length})
+						<svg
+							xmlns="http://www.w3.org/2000/svg"
+							class="h-3 w-3 transition-transform {showScheduled ? 'rotate-180' : ''}"
+							fill="none"
+							viewBox="0 0 24 24"
+							stroke="currentColor"
+							stroke-width="2"
+						>
+							<path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7" />
+						</svg>
+					</button>
+					<div class="h-px flex-1 bg-blue-300 dark:bg-blue-700"></div>
+				</div>
+
+				{#if showScheduled}
+					{#each scheduledMessages as message (message.guid)}
+						<MessageBubble
+							{message}
+							attachments={attachmentMap.get(message.guid) ?? []}
+							senderName={getSenderName(message)}
+							showSender={isGroup}
+							reactions={reactionMap.get(message.guid) ?? []}
+							onReact={handleReact}
+							onReply={handleReplyTo}
+							onEdit={handleEdit}
+							onUnsend={handleUnsend}
+							replyToText={getReplyToText(message)}
+						/>
+					{/each}
+				{/if}
+			{/if}
 
 			{#if typingAddresses.length > 0}
 				<div class="mb-1 flex justify-start">
@@ -375,6 +638,7 @@
 	<MessageInput
 		{chatGuid}
 		onSend={handleSend}
+		onSendAttachment={handleSendAttachment}
 		onTypingStart={handleTypingStart}
 		onTypingStop={handleTypingStop}
 		{replyTo}

@@ -19,13 +19,28 @@
 	let { message, attachments, senderName, showSender, reactions, onReact, onReply, onEdit, onUnsend, replyToText }: Props = $props();
 
 	const isSent = $derived(message.isFromMe);
-	const isRetracted = $derived(message.dateRetracted !== null);
-	const isEdited = $derived(message.dateEdited !== null);
+	const isRetracted = $derived(
+		message.dateRetracted !== null ||
+			(message.text === null && message.dateEdited !== null)
+	);
+	const isEdited = $derived(message.dateEdited !== null && !isRetracted);
+	const isScheduled = $derived(message.dateCreated > Date.now());
 
-	let showPicker = $state(false);
-	let hoverTimeout: ReturnType<typeof setTimeout> | undefined = $state();
+	let contextMenuVisible = $state(false);
+	let contextMenuX = $state(0);
+	let contextMenuY = $state(0);
 	let editing = $state(false);
 	let editText = $state('');
+
+	// Close context menu on scroll
+	$effect(() => {
+		if (!contextMenuVisible) return;
+		const onScroll = () => {
+			contextMenuVisible = false;
+		};
+		window.addEventListener('scroll', onScroll, true);
+		return () => window.removeEventListener('scroll', onScroll, true);
+	});
 
 	const reactionTypeToEmoji: Record<number, string> = {
 		2000: '❤️',
@@ -80,7 +95,7 @@
 	});
 
 	const deliveryStatus = $derived.by(() => {
-		if (!isSent) return null;
+		if (!isSent || isRetracted) return null;
 		if (message.error !== 0) return 'Not delivered';
 		if (message.dateRead) return 'Read';
 		if (message.dateDelivered || message.isDelivered) return 'Delivered';
@@ -93,6 +108,25 @@
 			minute: '2-digit'
 		})
 	);
+
+	const scheduledTime = $derived(
+		isScheduled
+			? new Date(message.dateCreated).toLocaleString(undefined, {
+					month: 'short',
+					day: 'numeric',
+					hour: 'numeric',
+					minute: '2-digit'
+				})
+			: null
+	);
+
+	// Filter out iMessage rich link preview metadata (not user-shared files)
+	const displayAttachments = $derived(
+		attachments.filter((a) => !a.transferName?.endsWith('.pluginPayloadAttachment'))
+	);
+
+	// Strip the U+FFFC object replacement character iMessage uses for inline attachments
+	const displayText = $derived(message.text?.replace(/\uFFFC/g, '').trim() || null);
 
 	function isImage(mimeType: string | null): boolean {
 		return mimeType?.startsWith('image/') ?? false;
@@ -114,33 +148,53 @@
 		return `${parseFloat((bytes / Math.pow(k, i)).toFixed(1))} ${sizes[i]}`;
 	}
 
-	function handleMouseEnter() {
-		hoverTimeout = setTimeout(() => {
-			showPicker = true;
-		}, 500);
+	function handleContextMenu(event: MouseEvent) {
+		event.preventDefault();
+		if (editing) return;
+
+		let x = event.clientX;
+		let y = event.clientY;
+
+		// Adjust if menu would go off-screen
+		const menuWidth = 220;
+		const menuHeight = 280;
+		if (x + menuWidth > window.innerWidth) {
+			x = window.innerWidth - menuWidth - 8;
+		}
+		if (y + menuHeight > window.innerHeight) {
+			y = window.innerHeight - menuHeight - 8;
+		}
+
+		contextMenuX = x;
+		contextMenuY = y;
+		contextMenuVisible = true;
 	}
 
-	function handleMouseLeave() {
-		if (hoverTimeout) {
-			clearTimeout(hoverTimeout);
-			hoverTimeout = undefined;
-		}
-		showPicker = false;
+	function closeContextMenu() {
+		contextMenuVisible = false;
 	}
 
 	function handleReact(reaction: string) {
-		showPicker = false;
+		closeContextMenu();
 		onReact(message.guid, reaction);
 	}
 
 	function handleReply() {
+		closeContextMenu();
 		onReply(message);
+	}
+
+	function handleCopy() {
+		closeContextMenu();
+		if (displayText) {
+			navigator.clipboard.writeText(displayText);
+		}
 	}
 
 	function startEdit() {
 		editText = message.text ?? '';
 		editing = true;
-		showPicker = false;
+		closeContextMenu();
 	}
 
 	async function saveEdit() {
@@ -153,7 +207,7 @@
 	}
 
 	function handleUnsend() {
-		showPicker = false;
+		closeContextMenu();
 		onUnsend(message.guid);
 	}
 
@@ -165,53 +219,13 @@
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <div
 	class="group relative flex {isSent ? 'justify-end' : 'justify-start'} mb-1"
-	onmouseenter={handleMouseEnter}
-	onmouseleave={handleMouseLeave}
+	oncontextmenu={handleContextMenu}
 >
 	<div class="flex max-w-[75%] flex-col {isSent ? 'items-end' : 'items-start'}">
 		{#if showSender && !isSent}
 			<span class="mb-0.5 px-3 text-xs font-medium text-gray-500 dark:text-gray-400">
 				{senderName}
 			</span>
-		{/if}
-
-		<!-- Reaction picker and reply action (appears above the bubble on hover) -->
-		{#if showPicker && !editing}
-			<div class="absolute {isSent ? 'right-0' : 'left-0'} bottom-full z-10 mb-1 flex items-center gap-1">
-				<ReactionPicker onReact={handleReact} />
-				<button
-					onclick={handleReply}
-					class="flex h-8 w-8 items-center justify-center rounded-full bg-white shadow-md transition-colors hover:bg-gray-100 dark:bg-gray-700 dark:hover:bg-gray-600"
-					aria-label="Reply to message"
-					title="Reply"
-				>
-					<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 text-gray-600 dark:text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-						<path stroke-linecap="round" stroke-linejoin="round" d="M3 10h10a5 5 0 015 5v4M3 10l6-6M3 10l6 6" />
-					</svg>
-				</button>
-				{#if isSent && !isRetracted}
-					<button
-						onclick={startEdit}
-						class="flex h-8 w-8 items-center justify-center rounded-full bg-white shadow-md transition-colors hover:bg-gray-100 dark:bg-gray-700 dark:hover:bg-gray-600"
-						aria-label="Edit message"
-						title="Edit"
-					>
-						<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 text-gray-600 dark:text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-							<path stroke-linecap="round" stroke-linejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-						</svg>
-					</button>
-					<button
-						onclick={handleUnsend}
-						class="flex h-8 w-8 items-center justify-center rounded-full bg-white shadow-md transition-colors hover:bg-red-100 dark:bg-gray-700 dark:hover:bg-red-900/30"
-						aria-label="Unsend message"
-						title="Unsend"
-					>
-						<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 text-red-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-							<path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-						</svg>
-					</button>
-				{/if}
-			</div>
 		{/if}
 
 		<!-- Reply-to preview -->
@@ -225,10 +239,21 @@
 		{/if}
 
 		<div
-			class="rounded-2xl px-3 py-2 {isSent
-				? 'bg-blue-500 text-white'
-				: 'bg-gray-200 text-gray-900 dark:bg-gray-700 dark:text-white'}"
+			class="rounded-2xl px-3 py-2 {isScheduled
+				? 'border-2 border-dashed border-blue-400 bg-transparent'
+				: isSent
+					? 'bg-blue-500 text-white'
+					: 'bg-gray-200 text-gray-900 dark:bg-gray-700 dark:text-white'}"
 		>
+			{#if isScheduled}
+				<div class="mb-1 flex items-center gap-1 text-xs text-blue-500 dark:text-blue-400">
+					<svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+						<path stroke-linecap="round" stroke-linejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+					</svg>
+					Scheduled{scheduledTime ? ` for ${scheduledTime}` : ''}
+				</div>
+			{/if}
+
 			{#if isRetracted}
 				<p class="text-sm italic opacity-60">Message unsent</p>
 			{:else if editing}
@@ -254,9 +279,9 @@
 					</div>
 				</div>
 			{:else}
-				{#if attachments.length > 0}
+				{#if displayAttachments.length > 0}
 					<div class="flex flex-col gap-1.5">
-						{#each attachments as att (att.guid)}
+						{#each displayAttachments as att (att.guid)}
 							{#if isImage(att.mimeType)}
 								<a
 									href={attachmentUrl(att.guid)}
@@ -315,8 +340,8 @@
 					</div>
 				{/if}
 
-				{#if message.text}
-					<p class="whitespace-pre-wrap break-words text-sm">{message.text}</p>
+				{#if displayText}
+					<p class="whitespace-pre-wrap break-words text-sm {isScheduled ? 'text-blue-600 dark:text-blue-400' : ''}">{displayText}</p>
 				{/if}
 
 				{#if isEdited}
@@ -342,3 +367,66 @@
 		</div>
 	</div>
 </div>
+
+<!-- Context menu (fixed positioning, escapes overflow containers) -->
+{#if contextMenuVisible}
+	<!-- svelte-ignore a11y_no_static_element_interactions -->
+	<div
+		class="fixed inset-0 z-50"
+		onclick={closeContextMenu}
+		oncontextmenu={(e) => {
+			e.preventDefault();
+			closeContextMenu();
+		}}
+	></div>
+	<div
+		class="fixed z-[51] flex flex-col gap-1"
+		style="left: {contextMenuX}px; top: {contextMenuY}px;"
+	>
+		<ReactionPicker onReact={handleReact} />
+
+		<div class="min-w-[160px] overflow-hidden rounded-xl bg-white shadow-lg ring-1 ring-black/10 dark:bg-gray-800 dark:ring-white/10">
+			<button
+				onclick={handleReply}
+				class="flex w-full items-center gap-2.5 px-3 py-2 text-left text-sm text-gray-700 transition-colors hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-gray-700"
+			>
+				<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+					<path stroke-linecap="round" stroke-linejoin="round" d="M3 10h10a5 5 0 015 5v4M3 10l6-6M3 10l6 6" />
+				</svg>
+				Reply
+			</button>
+			{#if displayText}
+				<button
+					onclick={handleCopy}
+					class="flex w-full items-center gap-2.5 px-3 py-2 text-left text-sm text-gray-700 transition-colors hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-gray-700"
+				>
+					<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+						<path stroke-linecap="round" stroke-linejoin="round" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+					</svg>
+					Copy
+				</button>
+			{/if}
+			{#if isSent && !isRetracted}
+				<hr class="border-gray-200 dark:border-gray-700" />
+				<button
+					onclick={startEdit}
+					class="flex w-full items-center gap-2.5 px-3 py-2 text-left text-sm text-gray-700 transition-colors hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-gray-700"
+				>
+					<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+						<path stroke-linecap="round" stroke-linejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+					</svg>
+					Edit
+				</button>
+				<button
+					onclick={handleUnsend}
+					class="flex w-full items-center gap-2.5 px-3 py-2 text-left text-sm text-red-600 transition-colors hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-900/20"
+				>
+					<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+						<path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+					</svg>
+					Unsend
+				</button>
+			{/if}
+		</div>
+	</div>
+{/if}

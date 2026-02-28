@@ -1,6 +1,6 @@
 import { db } from '$lib/db/index.js';
 import { chatToDb, messageToDb, handleToDb, attachmentToDb } from '$lib/sync/transforms.js';
-import type { Chat, Message } from '$lib/types/index.js';
+import type { Chat, Message, Handle } from '$lib/types/index.js';
 import type { ApiResponse } from '$lib/types/index.js';
 import { SSEClient } from '$lib/sync/sse.js';
 
@@ -12,6 +12,8 @@ export class SyncEngine {
 	typingIndicators: Map<string, Set<string>> = $state(new Map());
 
 	private sse = new SSEClient();
+	private syncedChatGuids = new Set<string>();
+	private chatMessageSyncPromises = new Map<string, Promise<void>>();
 
 	async start() {
 		this.sse.onEvent((type, data) => this.handleEvent(type, data));
@@ -34,7 +36,7 @@ export class SyncEngine {
 	async initialSync() {
 		this.syncing = true;
 		try {
-			// Fetch all chats
+			// Step 1: Fetch and store chats immediately — UI shows chat list
 			const chatRes = await proxyPost<Chat[]>('/api/proxy/chat/query', {
 				with: ['participants', 'lastMessage'],
 				sort: 'lastmessage',
@@ -46,35 +48,35 @@ export class SyncEngine {
 				return;
 			}
 
-			// Store chats and handles
 			await db.transaction('rw', [db.chats, db.handles], async () => {
 				for (const chat of chatRes.data) {
 					const dbChat = chatToDb(chat);
-					// Preserve client-side isPinned if chat already exists
 					const existing = await db.chats.get(dbChat.guid);
 					if (existing) {
 						dbChat.isPinned = existing.isPinned;
 					}
 					await db.chats.put(dbChat);
 
-					// Store participant handles
 					if (chat.participants) {
 						for (const handle of chat.participants) {
-							await db.handles.put(handleToDb(handle));
+							await this.upsertHandle(handle);
 						}
 					}
 				}
 			});
 
-			// Fetch recent messages per chat
-			for (const chat of chatRes.data) {
-				await this.syncChatMessages(chat.guid, MESSAGES_PER_CHAT);
-			}
-
+			// Save timestamp early so next load uses incremental sync
 			await this.saveSyncTimestamp();
 		} finally {
+			// Chat list is now visible — stop showing "Syncing..."
 			this.syncing = false;
 		}
+
+		// Step 2: Background tasks — don't block UI
+		// These run concurrently and progressively update the UI
+		this.resolveContacts().catch(() => {});
+		this.syncPinnedChats().catch(() => {});
+		this.syncAllChatMessagesInBackground().catch(() => {});
 	}
 
 	async incrementalSync(since: string) {
@@ -84,7 +86,7 @@ export class SyncEngine {
 			const msgRes = await proxyPost<Message[]>('/api/proxy/message/query', {
 				with: ['chats', 'attachment', 'handle'],
 				sort: 'DESC',
-				after: since,
+				after: Number(since),
 				limit: 1000
 			});
 
@@ -97,7 +99,7 @@ export class SyncEngine {
 							await db.messages.put(messageToDb(msg));
 
 							if (msg.handle) {
-								await db.handles.put(handleToDb(msg.handle));
+								await this.upsertHandle(msg.handle);
 							}
 							if (msg.attachments) {
 								for (const att of msg.attachments) {
@@ -120,7 +122,6 @@ export class SyncEngine {
 				await db.transaction('rw', [db.chats, db.handles], async () => {
 					for (const chat of chatRes.data) {
 						const dbChat = chatToDb(chat);
-						// Preserve client-side isPinned
 						const existing = await db.chats.get(dbChat.guid);
 						if (existing) {
 							dbChat.isPinned = existing.isPinned;
@@ -129,7 +130,7 @@ export class SyncEngine {
 
 						if (chat.participants) {
 							for (const handle of chat.participants) {
-								await db.handles.put(handleToDb(handle));
+								await this.upsertHandle(handle);
 							}
 						}
 					}
@@ -140,6 +141,47 @@ export class SyncEngine {
 		} finally {
 			this.syncing = false;
 		}
+
+		// Background: resolve any new contacts and pinned chats
+		this.resolveContacts().catch(() => {});
+		this.syncPinnedChats().catch(() => {});
+	}
+
+	/**
+	 * Ensure messages are loaded for a specific chat.
+	 * Called by ChatView when a conversation is opened.
+	 * Returns immediately if already synced; otherwise fetches on demand.
+	 */
+	async ensureChatMessages(chatGuid: string): Promise<void> {
+		// Already synced this session
+		if (this.syncedChatGuids.has(chatGuid)) return;
+
+		// Already in-flight — wait for it
+		const existing = this.chatMessageSyncPromises.get(chatGuid);
+		if (existing) return existing;
+
+		// Check if messages already exist in IndexedDB (from a previous session)
+		const count = await db.messages
+			.where('chatGuid')
+			.equals(chatGuid)
+			.count();
+
+		if (count > 0) {
+			this.syncedChatGuids.add(chatGuid);
+			return;
+		}
+
+		// Fetch messages on demand
+		const promise = this.syncChatMessages(chatGuid, MESSAGES_PER_CHAT)
+			.then(() => {
+				this.syncedChatGuids.add(chatGuid);
+			})
+			.finally(() => {
+				this.chatMessageSyncPromises.delete(chatGuid);
+			});
+
+		this.chatMessageSyncPromises.set(chatGuid, promise);
+		return promise;
 	}
 
 	async handleEvent(type: string, data: unknown) {
@@ -150,10 +192,22 @@ export class SyncEngine {
 					'rw',
 					[db.messages, db.chats, db.attachments, db.handles],
 					async () => {
-						await db.messages.put(messageToDb(msg));
+						// Webhook payloads have chats: [] — resolve chatGuid
+						let chatGuid = msg.chats?.[0]?.guid ?? '';
+						if (!chatGuid) {
+							const existing = await db.messages.get(msg.guid);
+							if (existing?.chatGuid) {
+								chatGuid = existing.chatGuid;
+							}
+						}
+						if (!chatGuid && msg.handle?.address) {
+							chatGuid = await this.resolveChatGuid(msg.handle.address);
+						}
+
+						await db.messages.put(messageToDb(msg, chatGuid || undefined));
 
 						if (msg.handle) {
-							await db.handles.put(handleToDb(msg.handle));
+							await this.upsertHandle(msg.handle);
 						}
 						if (msg.attachments) {
 							for (const att of msg.attachments) {
@@ -162,7 +216,6 @@ export class SyncEngine {
 						}
 
 						// Update chat's last message and unread count
-						const chatGuid = msg.chats?.[0]?.guid;
 						if (chatGuid) {
 							const chat = await db.chats.get(chatGuid);
 							if (chat) {
@@ -183,8 +236,14 @@ export class SyncEngine {
 
 			case 'updated-message': {
 				const msg = data as Message;
-				await db.transaction('rw', [db.messages, db.attachments], async () => {
-					await db.messages.put(messageToDb(msg));
+				await db.transaction('rw', [db.messages, db.attachments, db.chats], async () => {
+					// Webhook payloads have chats: [] — resolve chatGuid
+					const existing = await db.messages.get(msg.guid);
+					let chatGuid = msg.chats?.[0]?.guid || existing?.chatGuid || '';
+					if (!chatGuid && msg.handle?.address) {
+						chatGuid = await this.resolveChatGuid(msg.handle.address);
+					}
+					await db.messages.put(messageToDb(msg, chatGuid || undefined));
 
 					if (msg.attachments) {
 						for (const att of msg.attachments) {
@@ -239,7 +298,7 @@ export class SyncEngine {
 						await db.chats.put(dbChat);
 						if (chatRes.data.participants) {
 							for (const handle of chatRes.data.participants) {
-								await db.handles.put(handleToDb(handle));
+								await this.upsertHandle(handle);
 							}
 						}
 					});
@@ -258,10 +317,10 @@ export class SyncEngine {
 
 		await db.transaction('rw', [db.messages, db.attachments, db.handles], async () => {
 			for (const msg of res.data) {
-				await db.messages.put(messageToDb(msg));
+				await db.messages.put(messageToDb(msg, chatGuid));
 
 				if (msg.handle) {
-					await db.handles.put(handleToDb(msg.handle));
+					await this.upsertHandle(msg.handle);
 				}
 				if (msg.attachments) {
 					for (const att of msg.attachments) {
@@ -283,10 +342,10 @@ export class SyncEngine {
 
 		await db.transaction('rw', [db.messages, db.attachments, db.handles], async () => {
 			for (const msg of res.data) {
-				await db.messages.put(messageToDb(msg));
+				await db.messages.put(messageToDb(msg, chatGuid));
 
 				if (msg.handle) {
-					await db.handles.put(handleToDb(msg.handle));
+					await this.upsertHandle(msg.handle);
 				}
 				if (msg.attachments) {
 					for (const att of msg.attachments) {
@@ -297,10 +356,160 @@ export class SyncEngine {
 		});
 	}
 
+	/** Sync messages for all chats in background, yielding between each */
+	private async syncAllChatMessagesInBackground() {
+		const chats = await db.chats.orderBy('lastMessageDate').reverse().toArray();
+		for (const chat of chats) {
+			// Skip if already synced on-demand by ChatView
+			if (this.syncedChatGuids.has(chat.guid)) continue;
+
+			try {
+				await this.syncChatMessages(chat.guid, MESSAGES_PER_CHAT);
+				this.syncedChatGuids.add(chat.guid);
+			} catch {
+				// Continue with next chat on failure
+			}
+
+			// Yield to avoid blocking the main thread
+			await new Promise((r) => setTimeout(r, 0));
+		}
+	}
+
+	private async resolveContacts() {
+		const handles = await db.handles.filter((h) => !h.displayName).toArray();
+		if (!handles.length) return;
+
+		// Step 1: Bulk-load contacts from macOS Contacts.app
+		try {
+			const res = await fetch('/api/contacts');
+			if (res.ok) {
+				const { data } = (await res.json()) as { data: Record<string, string> };
+				if (data && typeof data === 'object') {
+					await db.transaction('rw', db.handles, async () => {
+						for (const h of handles) {
+							const normalized = h.address.replace(/[\s\-()]/g, '').toLowerCase();
+							const name = data[normalized];
+							if (name) {
+								await db.handles.update(h.address, { displayName: name });
+							}
+						}
+					});
+				}
+			}
+		} catch {
+			// Contacts.app not available — continue to fallback
+		}
+
+		// Step 2: For any remaining unresolved handles, try imessage-rs API
+		const remaining = await db.handles.filter((h) => h.displayName === null).toArray();
+		if (!remaining.length) return;
+
+		// Probe first handle to check if the iCloud contact API is available
+		try {
+			const probeRes = await fetch(
+				`/api/proxy/icloud/contact?address=${encodeURIComponent(remaining[0].address)}`
+			);
+			if (!probeRes.ok) {
+				await db.transaction('rw', db.handles, async () => {
+					for (const h of remaining) {
+						await db.handles.update(h.address, { displayName: '' });
+					}
+				});
+				return;
+			}
+		} catch {
+			await db.transaction('rw', db.handles, async () => {
+				for (const h of remaining) {
+					await db.handles.update(h.address, { displayName: '' });
+				}
+			});
+			return;
+		}
+
+		const BATCH_SIZE = 25;
+		for (let i = 0; i < remaining.length; i += BATCH_SIZE) {
+			const batch = remaining.slice(i, i + BATCH_SIZE);
+			const results = await Promise.allSettled(
+				batch.map(async (h) => {
+					const res = await fetch(
+						`/api/proxy/icloud/contact?address=${encodeURIComponent(h.address)}`
+					);
+					if (!res.ok) return null;
+					return res.json();
+				})
+			);
+
+			for (let j = 0; j < results.length; j++) {
+				const result = results[j];
+				if (result.status === 'fulfilled' && result.value?.data) {
+					const data = result.value.data as {
+						name?: string | null;
+						avatar?: string | null;
+					};
+					const updates: Record<string, string> = {
+						displayName: data.name || ''
+					};
+					if (data.avatar) {
+						updates.avatarBase64 = data.avatar;
+					}
+					await db.handles.update(batch[j].address, updates);
+				} else {
+					await db.handles.update(batch[j].address, { displayName: '' });
+				}
+			}
+		}
+	}
+
+	private async syncPinnedChats() {
+		try {
+			const res = await fetch('/api/plist/pinned');
+			if (!res.ok) return;
+			const { data } = (await res.json()) as { data: string[] };
+			if (!Array.isArray(data)) return;
+
+			const pinnedSet = new Set(data);
+			const chats = await db.chats.toArray();
+
+			await db.transaction('rw', db.chats, async () => {
+				for (const chat of chats) {
+					const shouldBePinned = pinnedSet.has(chat.chatIdentifier);
+
+					if (chat.isPinned !== shouldBePinned) {
+						await db.chats.update(chat.guid, { isPinned: shouldBePinned });
+					}
+				}
+			});
+		} catch {
+			// Silently fail — plist may not be accessible
+		}
+	}
+
+	/** Resolve chatGuid from a handle address by looking up 1:1 chats in IndexedDB */
+	private async resolveChatGuid(address: string): Promise<string> {
+		const chats = await db.chats
+			.filter((c) => c.style === 45 && c.participants.length === 1 && c.participants[0] === address)
+			.toArray();
+		return chats[0]?.guid ?? '';
+	}
+
+	/** Upsert a handle, preserving existing displayName and avatarBase64 */
+	private async upsertHandle(handle: Handle) {
+		const existing = await db.handles.get(handle.address);
+		if (existing) {
+			// Only update API-provided fields, keep resolved contact info
+			await db.handles.update(handle.address, {
+				service: handle.service,
+				country: handle.country
+			});
+		} else {
+			await db.handles.put(handleToDb(handle));
+		}
+	}
+
 	private async saveSyncTimestamp() {
 		await db.syncMeta.put({
 			key: 'lastSyncTimestamp',
-			value: new Date().toISOString()
+			value: String(Date.now())
 		});
 	}
 }

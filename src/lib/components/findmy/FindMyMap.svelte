@@ -164,8 +164,11 @@
 		map = L.map(mapContainer, {
 			center: [39.8283, -98.5795], // Center of US as default
 			zoom: 4,
-			zoomControl: true
+			zoomControl: false
 		});
+
+		// Add zoom control at bottom-right to avoid overlapping MapViewToggle
+		L.control.zoom({ position: 'bottomright' }).addTo(map);
 
 		markersLayer = L.layerGroup().addTo(map);
 
@@ -191,7 +194,7 @@
 
 <div class="relative h-full w-full">
 	<div bind:this={mapContainer} class="h-full w-full"></div>
-	<div class="absolute right-3 top-3 z-[1000]">
+	<div class="absolute right-3 top-3 z-[400]">
 		<MapViewToggle currentView={mapView} onViewChange={handleViewChange} />
 	</div>
 </div>

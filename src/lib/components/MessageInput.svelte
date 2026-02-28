@@ -1,16 +1,18 @@
 <script lang="ts">
+	import { untrack } from 'svelte';
 	import AttachmentPreview from './AttachmentPreview.svelte';
 
 	interface Props {
 		chatGuid: string;
 		onSend: (text: string) => Promise<void>;
+		onSendAttachment: (files: File[], text: string, replyToGuid: string | null) => Promise<void>;
 		onTypingStart: () => void;
 		onTypingStop: () => void;
 		replyTo?: { guid: string; text: string | null; senderName: string } | null;
 		onCancelReply?: () => void;
 	}
 
-	let { chatGuid, onSend, onTypingStart, onTypingStop, replyTo = null, onCancelReply = () => {} }: Props = $props();
+	let { chatGuid, onSend, onSendAttachment, onTypingStart, onTypingStop, replyTo = null, onCancelReply = () => {} }: Props = $props();
 
 	let text = $state('');
 	let sending = $state(false);
@@ -91,25 +93,14 @@
 
 		try {
 			if (hasFiles) {
-				// Multipart send with attachments
-				const formData = new FormData();
-				formData.append('chatGuid', chatGuid);
-				formData.append('method', 'private-api');
-				if (trimmed) formData.append('message', trimmed);
-				if (replyTo) formData.append('selectedMessageGuid', replyTo.guid);
-				for (const file of pendingFiles) {
-					formData.append('attachment', file);
-				}
-				await fetch('/api/proxy/message/multipart', {
-					method: 'POST',
-					body: formData
-					// Do NOT set Content-Type header -- browser sets it automatically with boundary
-				});
+				const filesToSend = [...pendingFiles];
+				const replyGuid = replyTo?.guid ?? null;
 				pendingFiles = [];
 				text = '';
 				if (textareaEl) {
 					textareaEl.style.height = 'auto';
 				}
+				await onSendAttachment(filesToSend, trimmed, replyGuid);
 			} else {
 				// Text-only send via existing callback
 				await onSend(trimmed);
@@ -133,15 +124,16 @@
 
 	// Reset state when chatGuid changes
 	$effect(() => {
-		// Read chatGuid to create dependency
 		void chatGuid;
-		text = '';
-		sending = false;
-		pendingFiles = [];
-		if (isTyping) {
-			isTyping = false;
-			if (typingTimer) clearTimeout(typingTimer);
-		}
+		untrack(() => {
+			text = '';
+			sending = false;
+			pendingFiles = [];
+			if (isTyping) {
+				isTyping = false;
+				if (typingTimer) clearTimeout(typingTimer);
+			}
+		});
 	});
 
 	// Focus textarea when replyTo is set
