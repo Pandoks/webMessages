@@ -25,11 +25,17 @@ export const GET: RequestHandler = async () => {
 
 	try {
 		// AppleScript to bulk-load all contacts with phone numbers and emails
+		// Prefers nickname over formal name (emojis are often in nicknames)
 		const script = `
 set output to ""
 tell application "Contacts"
 	repeat with p in people
-		set n to name of p
+		set nn to nickname of p
+		if nn is not missing value and nn is not "" then
+			set n to nn
+		else
+			set n to name of p
+		end if
 		set phoneList to phones of p
 		repeat with ph in phoneList
 			set output to output & n & linefeed & (value of ph) & linefeed

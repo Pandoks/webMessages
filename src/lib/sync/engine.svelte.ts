@@ -250,6 +250,16 @@ export class SyncEngine {
 							await db.attachments.put(attachmentToDb(att, msg.guid));
 						}
 					}
+
+					// Update chat preview if this was the latest message (e.g. unsend)
+					if (chatGuid) {
+						const chat = await db.chats.get(chatGuid);
+						if (chat && msg.dateCreated >= chat.lastMessageDate) {
+							await db.chats.update(chatGuid, {
+								lastMessageText: msg.text
+							});
+						}
+					}
 				});
 				break;
 			}

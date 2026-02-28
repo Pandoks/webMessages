@@ -58,14 +58,14 @@
 		for (const r of reactions) {
 			const type = r.associatedMessageType;
 
-			// Use emoji reactions if available, otherwise map from type
+			// Standard iMessage reactions use the type-to-emoji map
+			// (associatedMessageEmoji contains the word "love"/"like"/etc, not actual emoji)
 			let emoji: string | null = null;
 			if (type >= 2000 && type <= 2005) {
-				emoji = r.associatedMessageEmoji ?? reactionTypeToEmoji[type] ?? null;
+				emoji = reactionTypeToEmoji[type] ?? null;
 			} else if (type >= 3000 && type <= 3005) {
-				// Removal — find the corresponding emoji
 				const addType = type - 1000;
-				emoji = r.associatedMessageEmoji ?? reactionTypeToEmoji[addType] ?? null;
+				emoji = reactionTypeToEmoji[addType] ?? null;
 			}
 
 			if (!emoji) continue;
@@ -206,6 +206,15 @@
 		editing = false;
 	}
 
+	function handleEditKeydown(e: KeyboardEvent) {
+		if (e.key === 'Enter' && !e.shiftKey) {
+			e.preventDefault();
+			saveEdit();
+		} else if (e.key === 'Escape') {
+			cancelEdit();
+		}
+	}
+
 	function handleUnsend() {
 		closeContextMenu();
 		onUnsend(message.guid);
@@ -238,6 +247,9 @@
 			</div>
 		{/if}
 
+		{#if isRetracted}
+			<span class="text-xs italic text-gray-400">You unsent a message {messageTime}</span>
+		{:else}
 		<div
 			class="rounded-2xl px-3 py-2 {isScheduled
 				? 'border-2 border-dashed border-blue-400 bg-transparent'
@@ -254,12 +266,11 @@
 				</div>
 			{/if}
 
-			{#if isRetracted}
-				<p class="text-sm italic opacity-60">Message unsent</p>
-			{:else if editing}
+			{#if editing}
 				<div class="flex flex-col gap-1.5">
 					<textarea
 						bind:value={editText}
+						onkeydown={handleEditKeydown}
 						class="w-full resize-none rounded-lg bg-white/20 px-2 py-1 text-sm text-inherit outline-none placeholder:text-white/50"
 						rows="2"
 					></textarea>
@@ -365,6 +376,7 @@
 				</span>
 			{/if}
 		</div>
+		{/if}
 	</div>
 </div>
 
@@ -408,6 +420,7 @@
 			{/if}
 			{#if isSent && !isRetracted}
 				<hr class="border-gray-200 dark:border-gray-700" />
+				{#if displayText}
 				<button
 					onclick={startEdit}
 					class="flex w-full items-center gap-2.5 px-3 py-2 text-left text-sm text-gray-700 transition-colors hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-gray-700"
@@ -417,6 +430,7 @@
 					</svg>
 					Edit
 				</button>
+				{/if}
 				<button
 					onclick={handleUnsend}
 					class="flex w-full items-center gap-2.5 px-3 py-2 text-left text-sm text-red-600 transition-colors hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-900/20"

@@ -337,13 +337,17 @@
 	}
 
 	async function handleSendAttachment(files: File[], text: string, replyToGuid: string | null) {
+		// Send text as a separate message first (imessage-rs attachment API doesn't support inline text)
+		if (text) {
+			await handleSend(text);
+		}
+
 		for (let i = 0; i < files.length; i++) {
 			const tempGuid = crypto.randomUUID();
 			const formData = new FormData();
 			formData.append('chatGuid', chatGuid);
 			formData.append('method', 'apple-script');
 			formData.append('tempGuid', tempGuid);
-			if (i === 0 && text) formData.append('message', text);
 			if (i === 0 && replyToGuid) formData.append('selectedMessageGuid', replyToGuid);
 			formData.append('attachment', files[i]);
 
@@ -360,7 +364,7 @@
 				await db.messages.put({
 					guid: msgGuid,
 					chatGuid,
-					text: (i === 0 && text) ? text : '\ufffc',
+					text: '\ufffc',
 					handleId: 0,
 					handleAddress: null,
 					isFromMe: true,
@@ -488,10 +492,15 @@
 			body: JSON.stringify({ partIndex: 0 })
 		});
 		if (res.ok) {
+			const msg = await db.messages.get(messageGuid);
 			await db.messages.update(messageGuid, {
 				text: null,
 				dateRetracted: Date.now()
 			});
+			// Update chat preview if this was the latest message
+			if (msg && chat && msg.dateCreated >= chat.lastMessageDate) {
+				await db.chats.update(chatGuid, { lastMessageText: null });
+			}
 		}
 	}
 
