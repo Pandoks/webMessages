@@ -391,12 +391,6 @@
 	// ── Keyboard handling ──
 
 	function handleKeydown(e: KeyboardEvent) {
-		if (e.key === 'Escape') {
-			e.preventDefault();
-			onClose();
-			return;
-		}
-
 		if (e.key === 'ArrowDown') {
 			e.preventDefault();
 			if (searchResults.length > 0) {
@@ -415,6 +409,7 @@
 
 		if (e.key === 'Enter') {
 			e.preventDefault();
+			if (creating) return;
 			if (searchResults.length > 0 && highlightedIndex < searchResults.length) {
 				selectResult(searchResults[highlightedIndex]);
 			}
@@ -550,6 +545,7 @@
 					onkeydown={handleKeydown}
 					type="text"
 					placeholder={selectedRecipients.length === 0 ? 'Search contacts...' : ''}
+					aria-label="Search contacts or enter phone number or email"
 					class="min-w-[80px] flex-1 bg-transparent text-sm outline-none dark:text-white"
 				/>
 			</div>
