@@ -15,7 +15,7 @@
 	let { x, y, isPinned, isGroup, hasUnread, onPin, onDelete, onToggleRead, onLeave, onClose }: Props = $props();
 
 	// Adjust position so menu stays on-screen
-	const menuWidth = 220;
+	const menuWidth = 200;
 	let adjustedX = $derived(x + menuWidth > window.innerWidth ? window.innerWidth - menuWidth - 8 : x);
 	let adjustedY = $derived.by(() => {
 		const menuHeight = isGroup ? 220 : 180;
@@ -44,23 +44,23 @@
 	});
 
 	function handlePin() {
-		onPin();
 		onClose();
+		onPin();
 	}
 
 	function handleToggleRead() {
-		onToggleRead();
 		onClose();
+		onToggleRead();
 	}
 
 	function handleLeave() {
-		onLeave();
 		onClose();
+		onLeave();
 	}
 
 	function handleDelete() {
-		onDelete();
 		onClose();
+		onDelete();
 	}
 </script>
 
