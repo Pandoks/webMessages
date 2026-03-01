@@ -27,6 +27,31 @@
 	);
 	const isEdited = $derived(message.dateEdited !== null && !isRetracted);
 	const isScheduled = $derived(message.dateCreated > Date.now());
+	// Reactive clock that ticks every second while context menu is open
+	let now = $state(Date.now());
+	$effect(() => {
+		if (!contextMenuVisible) return;
+		now = Date.now();
+		const id = setInterval(() => { now = Date.now(); }, 1000);
+		return () => clearInterval(id);
+	});
+
+	const canEdit = $derived(
+		message.editExpiresAt != null && message.editExpiresAt > now
+	);
+	const canUnsend = $derived(
+		message.unsendExpiresAt != null && message.unsendExpiresAt > now
+	);
+
+	function formatTimeLeft(expiresAt: number | null | undefined): string {
+		if (!expiresAt) return '';
+		const remaining = expiresAt - now;
+		if (remaining <= 0) return '';
+		const mins = Math.floor(remaining / 60000);
+		const secs = Math.floor((remaining % 60000) / 1000);
+		if (mins > 0) return `${mins}m ${secs}s`;
+		return `${secs}s`;
+	}
 
 	let contextMenuVisible = $state(false);
 	let contextMenuX = $state(0);
@@ -286,7 +311,7 @@
 	class="group relative flex {isSent ? 'justify-end' : 'justify-start'} mb-1"
 	oncontextmenu={handleContextMenu}
 >
-	<div class="flex max-w-[75%] flex-col {isSent ? 'items-end' : 'items-start'}">
+	<div class="flex min-w-0 max-w-[75%] flex-col {isSent ? 'items-end' : 'items-start'}">
 		{#if showSender && !isSent}
 			<span class="mb-0.5 px-3 text-xs font-medium text-gray-500 dark:text-gray-400">
 				{senderName}
@@ -308,7 +333,7 @@
 		{:else}
 		<div
 			bind:this={bubbleEl}
-			class="rounded-2xl px-3 py-2 {isScheduled
+			class="overflow-hidden rounded-2xl px-3 py-2 {isScheduled
 				? 'border-2 border-dashed border-blue-400 bg-transparent'
 				: isSent
 					? 'bg-blue-500 text-white'
@@ -450,7 +475,7 @@
 				{/if}
 
 				{#if displayText}
-					<p class="whitespace-pre-wrap break-words text-sm {isScheduled ? 'text-blue-600 dark:text-blue-400' : ''}">{displayText}</p>
+					<p class="whitespace-pre-wrap [overflow-wrap:anywhere] text-sm {isScheduled ? 'text-blue-600 dark:text-blue-400' : ''}">{displayText}</p>
 				{/if}
 
 				{#if isEdited}
@@ -548,23 +573,29 @@
 				<hr class="border-gray-200 dark:border-gray-700" />
 				{#if displayText}
 				<button
-					onclick={startEdit}
-					class="flex w-full items-center gap-2.5 px-3 py-2 text-left text-sm text-gray-700 transition-colors hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-gray-700"
+					onclick={canEdit ? startEdit : undefined}
+					disabled={!canEdit}
+					class="flex w-full items-center gap-2.5 px-3 py-2 text-left text-sm transition-colors {canEdit
+						? 'text-gray-700 hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-gray-700'
+						: 'cursor-default text-gray-400 dark:text-gray-600'}"
 				>
-					<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+					<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 {canEdit ? 'text-gray-400' : 'text-gray-300 dark:text-gray-600'}" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
 						<path stroke-linecap="round" stroke-linejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
 					</svg>
-					Edit
+					Edit{#if canEdit}{@const t = formatTimeLeft(message.editExpiresAt)}{#if t} <span class="ml-auto text-xs text-gray-400 dark:text-gray-500">{t}</span>{/if}{:else} <span class="ml-auto text-xs text-gray-400 dark:text-gray-600">(expired)</span>{/if}
 				</button>
 				{/if}
 				<button
-					onclick={handleUnsend}
-					class="flex w-full items-center gap-2.5 px-3 py-2 text-left text-sm text-red-600 transition-colors hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-900/20"
+					onclick={canUnsend ? handleUnsend : undefined}
+					disabled={!canUnsend}
+					class="flex w-full items-center gap-2.5 px-3 py-2 text-left text-sm transition-colors {canUnsend
+						? 'text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-900/20'
+						: 'cursor-default text-gray-400 dark:text-gray-600'}"
 				>
-					<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+					<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 {canUnsend ? '' : 'text-gray-300 dark:text-gray-600'}" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
 						<path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
 					</svg>
-					Unsend
+					Unsend{#if canUnsend}{@const t = formatTimeLeft(message.unsendExpiresAt)}{#if t} <span class="ml-auto text-xs text-red-400 dark:text-red-500">{t}</span>{/if}{:else} <span class="ml-auto text-xs text-gray-400 dark:text-gray-600">(expired)</span>{/if}
 				</button>
 			{/if}
 		</div>

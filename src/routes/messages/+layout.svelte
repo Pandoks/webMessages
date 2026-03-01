@@ -8,7 +8,7 @@
 	<aside class="flex w-80 flex-col border-r border-gray-200 dark:border-gray-700">
 		<ChatList />
 	</aside>
-	<div class="flex flex-1 flex-col">
+	<div class="flex flex-1 flex-col overflow-hidden">
 		{@render children()}
 	</div>
 </div>

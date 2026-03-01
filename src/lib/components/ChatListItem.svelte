@@ -58,7 +58,7 @@
 			<span class="shrink-0 text-xs text-gray-400">{formatRelativeTime(lastMessageDate)}</span>
 		</div>
 		<div class="flex items-center justify-between">
-			<span class="truncate text-xs text-gray-500 dark:text-gray-400"
+			<span class="truncate text-xs text-gray-500 dark:text-gray-400 {displayLastMessage?.includes('unsent') ? 'italic' : ''}"
 				>{displayLastMessage ?? ''}</span
 			>
 			{#if unreadCount > 0}

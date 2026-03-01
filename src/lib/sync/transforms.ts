@@ -1,6 +1,22 @@
 import type { Chat, Message, Handle, Attachment } from '$lib/types/index.js';
 import type { DbChat, DbMessage, DbHandle, DbAttachment } from '$lib/db/types.js';
 
+/** Derive sidebar preview text from a message's state. */
+export function derivePreviewText(msg: {
+	dateRetracted: number | null;
+	isFromMe: boolean;
+	text: string | null;
+	attachmentGuids?: string[];
+}): string | null {
+	if (msg.dateRetracted) {
+		return msg.isFromMe ? 'You unsent a message' : 'This message was unsent';
+	}
+	const cleaned = msg.text?.replace(/\uFFFC/g, '').trim();
+	if (cleaned) return msg.text;
+	if (msg.attachmentGuids?.length || msg.text?.includes('\uFFFC')) return 'Attachment';
+	return null;
+}
+
 export function chatToDb(chat: Chat): DbChat {
 	return {
 		guid: chat.guid,
@@ -8,7 +24,14 @@ export function chatToDb(chat: Chat): DbChat {
 		displayName: chat.displayName,
 		style: chat.style,
 		lastMessageDate: chat.lastMessage?.dateCreated ?? 0,
-		lastMessageText: chat.lastMessage?.text ?? null,
+		lastMessageText: chat.lastMessage
+			? derivePreviewText({
+					dateRetracted: chat.lastMessage.dateRetracted,
+					isFromMe: chat.lastMessage.isFromMe,
+					text: chat.lastMessage.text,
+					attachmentGuids: chat.lastMessage.attachments?.map((a) => a.guid)
+				})
+			: null,
 		isArchived: chat.isArchived,
 		isPinned: false,
 		unreadCount: 0,

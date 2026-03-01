@@ -1,5 +1,5 @@
 import { db } from '$lib/db/index.js';
-import { chatToDb, messageToDb, handleToDb, attachmentToDb } from '$lib/sync/transforms.js';
+import { chatToDb, messageToDb, handleToDb, attachmentToDb, derivePreviewText } from '$lib/sync/transforms.js';
 import type { Chat, Message, Handle } from '$lib/types/index.js';
 import type { ApiResponse } from '$lib/types/index.js';
 import { SSEClient } from '$lib/sync/sse.js';
@@ -56,6 +56,9 @@ export class SyncEngine {
 					if (existing) {
 						dbChat.isPinned = existing.isPinned;
 						dbChat.unreadCount = existing.unreadCount;
+						if (!dbChat.lastMessageText && existing.lastMessageText) {
+							dbChat.lastMessageText = existing.lastMessageText;
+						}
 					}
 					await db.chats.put(dbChat);
 
@@ -76,9 +79,11 @@ export class SyncEngine {
 
 		// Step 2: Background tasks — don't block UI
 		// These run concurrently and progressively update the UI
+		this.fixBlankPreviews().catch(() => {});
 		this.resolveContacts().catch(() => {});
 		this.syncPinnedChats().catch(() => {});
 		this.syncUnreadCounts().catch(() => {});
+		this.syncEligibility().catch(() => {});
 		this.syncAllChatMessagesInBackground().catch(() => {});
 	}
 
@@ -114,6 +119,9 @@ export class SyncEngine {
 				);
 			}
 
+			// Update edit/unsend eligibility for recent sent messages
+			await this.syncEligibility();
+
 			// Re-fetch chat list to pick up any new/updated chats
 			const chatRes = await proxyPost<Chat[]>('/api/proxy/chat/query', {
 				with: ['participants', 'lastMessage'],
@@ -128,6 +136,9 @@ export class SyncEngine {
 						const existing = await db.chats.get(dbChat.guid);
 						if (existing) {
 							dbChat.isPinned = existing.isPinned;
+							if (!dbChat.lastMessageText && existing.lastMessageText) {
+								dbChat.lastMessageText = existing.lastMessageText;
+							}
 						}
 						await db.chats.put(dbChat);
 
@@ -144,6 +155,9 @@ export class SyncEngine {
 		} finally {
 			this.syncing = false;
 		}
+
+		// Fix chat previews that are blank due to invisible system messages or retractions
+		this.fixBlankPreviews().catch(() => {});
 
 		// Background: resolve any new contacts and pinned chats
 		this.resolveContacts().catch(() => {});
@@ -223,9 +237,10 @@ export class SyncEngine {
 						if (chatGuid) {
 							const chat = await db.chats.get(chatGuid);
 							if (chat) {
+								const storedMsg = await db.messages.get(msg.guid);
 								const updates: Partial<typeof chat> = {
 									lastMessageDate: msg.dateCreated,
-									lastMessageText: msg.text
+									lastMessageText: storedMsg ? derivePreviewText(storedMsg) : (msg.text ?? null)
 								};
 								if (!msg.isFromMe) {
 									updates.unreadCount = (chat.unreadCount ?? 0) + 1;
@@ -235,6 +250,8 @@ export class SyncEngine {
 						}
 					}
 				);
+				// Refresh eligibility for sent messages
+				if (msg.isFromMe) this.syncEligibility().catch(() => {});
 				break;
 			}
 
@@ -247,7 +264,12 @@ export class SyncEngine {
 					if (!chatGuid && msg.handle?.address) {
 						chatGuid = await this.resolveChatGuid(msg.handle.address);
 					}
-					await db.messages.put(messageToDb(msg, chatGuid || undefined));
+					const dbMsg = messageToDb(msg, chatGuid || undefined);
+					// Preserve locally-authoritative dateRetracted — imessage-rs never returns it
+					if (!dbMsg.dateRetracted && existing?.dateRetracted) {
+						dbMsg.dateRetracted = existing.dateRetracted;
+					}
+					await db.messages.put(dbMsg);
 
 					if (msg.attachments) {
 						for (const att of msg.attachments) {
@@ -255,12 +277,12 @@ export class SyncEngine {
 						}
 					}
 
-					// Update chat preview if this was the latest message (e.g. unsend)
+					// Update chat preview using the MERGED message state
 					if (chatGuid) {
 						const chat = await db.chats.get(chatGuid);
-						if (chat && msg.dateCreated >= chat.lastMessageDate) {
+						if (chat && dbMsg.dateCreated >= chat.lastMessageDate) {
 							await db.chats.update(chatGuid, {
-								lastMessageText: msg.text
+								lastMessageText: derivePreviewText(dbMsg)
 							});
 						}
 					}
@@ -312,6 +334,9 @@ export class SyncEngine {
 					if (existing) {
 						dbChat.isPinned = existing.isPinned;
 						dbChat.unreadCount = existing.unreadCount;
+						if (!dbChat.lastMessageText && existing.lastMessageText) {
+							dbChat.lastMessageText = existing.lastMessageText;
+						}
 					}
 					await db.transaction('rw', [db.chats, db.handles], async () => {
 						await db.chats.put(dbChat);
@@ -392,6 +417,7 @@ export class SyncEngine {
 			// Yield to avoid blocking the main thread
 			await new Promise((r) => setTimeout(r, 0));
 		}
+
 	}
 
 	private async resolveContacts() {
@@ -445,6 +471,93 @@ export class SyncEngine {
 					if (chat.unreadCount !== count) {
 						await db.chats.update(chat.guid, { unreadCount: count });
 					}
+				}
+			});
+		} catch {
+			// Silently fail — chat.db may not be accessible
+		}
+	}
+
+	private async fixBlankPreviews() {
+		// 1. Override previews for chats where the last visible message is retracted.
+		//    This must run for ALL chats (not just blanks) because the API may have
+		//    returned a non-retracted message as lastMessage, producing wrong text.
+		try {
+			const res = await fetch('/api/chat-previews');
+			if (res.ok) {
+				const { data } = (await res.json()) as { data: Record<string, string> };
+				if (data && Object.keys(data).length) {
+					await db.transaction('rw', db.chats, async () => {
+						for (const [guid, text] of Object.entries(data)) {
+							await db.chats.update(guid, { lastMessageText: text });
+						}
+					});
+				}
+			}
+		} catch {}
+
+		// 2. For remaining blanks, fetch recent messages from imessage-rs per-chat API
+		//    (handles attributedBody parsing that we can't do in SQL)
+		const blanks = await db.chats.filter((c) => !c.lastMessageText).toArray();
+		for (const chat of blanks) {
+			try {
+				const res = await proxyGet<Message[]>(
+					`/api/proxy/chat/${encodeURIComponent(chat.guid)}/message?limit=30&sort=DESC`
+				);
+				// Find the first message with actual content (skip invisible system messages)
+				const visible = res.data?.find(
+					(m: Message) => m.text || (m.attachments && m.attachments.length > 0)
+				);
+				if (visible) {
+					await db.chats.update(chat.guid, {
+						lastMessageText: visible.text || 'Attachment'
+					});
+				}
+			} catch {}
+		}
+	}
+
+	private async syncEligibility() {
+		try {
+			const res = await fetch('/api/message-eligibility');
+			if (!res.ok) return;
+			const { data } = (await res.json()) as {
+				data: Record<
+					string,
+					{
+						editExpiresAt: number | null;
+						unsendExpiresAt: number | null;
+					}
+				>;
+			};
+			if (!data) return;
+
+			const eligibleGuids = new Set(Object.keys(data));
+
+			await db.transaction('rw', db.messages, async () => {
+				// Set expiry timestamps on messages returned by the API
+				for (const guid of eligibleGuids) {
+					const elig = data[guid];
+					await db.messages.update(guid, {
+						editExpiresAt: elig.editExpiresAt,
+						unsendExpiresAt: elig.unsendExpiresAt
+					});
+				}
+
+				// Clear expiry on messages that aged out of the window
+				const stale = await db.messages
+					.filter(
+						(m) =>
+							m.isFromMe &&
+							(m.editExpiresAt != null || m.unsendExpiresAt != null) &&
+							!eligibleGuids.has(m.guid)
+					)
+					.toArray();
+				for (const m of stale) {
+					await db.messages.update(m.guid, {
+						editExpiresAt: null,
+						unsendExpiresAt: null
+					});
 				}
 			});
 		} catch {

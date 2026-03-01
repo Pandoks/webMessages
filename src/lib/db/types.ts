@@ -36,6 +36,8 @@ export interface DbMessage {
 	groupActionType: number;
 	isSystemMessage: boolean;
 	itemType: number;
+	editExpiresAt?: number | null;
+	unsendExpiresAt?: number | null;
 }
 
 export interface DbHandle {

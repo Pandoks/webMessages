@@ -8,6 +8,8 @@
 	import MessageInput from './MessageInput.svelte';
 	import LocationPanel from './LocationPanel.svelte';
 	import { getChatDisplayName, formatPhoneNumber } from '$lib/utils/format.js';
+	import { visibilityStore } from '$lib/stores/visibility.svelte.js';
+	import { findMyStore } from '$lib/stores/findmy.svelte.js';
 
 	interface Props {
 		chatGuid: string;
@@ -161,28 +163,53 @@
 		return () => sub.unsubscribe();
 	});
 
-	// Mark as read when viewing — clear locally + send read receipt via imessage-rs
+	// Track whether a read receipt needs to be sent when the app becomes active
+	let pendingReadReceipt = $state(false);
+
+	// Mark as read — clear locally always, but only send read receipt when app is active
 	$effect(() => {
-		if (chat && chat.unreadCount > 0) {
-			db.chats.update(chatGuid, { unreadCount: 0 });
-			fetch(`/api/proxy/chat/${encodeURIComponent(chatGuid)}/read`, { method: 'POST' });
+		if (!chat || chat.unreadCount === 0) return;
+
+		db.chats.update(chatGuid, { unreadCount: 0 });
+
+		if (visibilityStore.isActive) {
+			const timer = setTimeout(() => {
+				fetch(`/api/proxy/chat/${encodeURIComponent(chatGuid)}/read`, { method: 'POST' });
+			}, 2000);
+			return () => clearTimeout(timer);
+		} else {
+			pendingReadReceipt = true;
 		}
 	});
 
-	// Clear reply when switching chats
+	// Send deferred read receipt when returning to the app
+	$effect(() => {
+		if (!visibilityStore.isActive || !pendingReadReceipt) return;
+
+		const timer = setTimeout(() => {
+			pendingReadReceipt = false;
+			fetch(`/api/proxy/chat/${encodeURIComponent(chatGuid)}/read`, { method: 'POST' });
+		}, 2000);
+		return () => clearTimeout(timer);
+	});
+
+	// Clear reply and pending read receipt when switching chats
 	$effect(() => {
 		void chatGuid;
 		replyTo = null;
+		pendingReadReceipt = false;
 	});
 
 	let scheduledMessages = $state<ScheduledMessage[]>([]);
+	let pendingMutations = $state(0);
 
 	async function fetchScheduledMessages() {
+		if (pendingMutations > 0) return;
 		try {
 			const res = await fetch(`/api/scheduled-messages?chatGuid=${encodeURIComponent(chatGuid)}`);
 			if (res.ok) {
 				const { data } = await res.json();
-				scheduledMessages = data;
+				if (pendingMutations === 0) scheduledMessages = data;
 			}
 		} catch {
 			// Silent fail — will retry on next poll
@@ -198,33 +225,54 @@
 	});
 
 	async function handleScheduleSend(text: string, scheduledAt: number) {
-		const res = await fetch('/api/scheduled-messages', {
-			method: 'POST',
-			headers: { 'Content-Type': 'application/json' },
-			body: JSON.stringify({ chatGuid, message: text, scheduledAt })
-		});
-		if (res.ok) await fetchScheduledMessages();
+		// Optimistic: add a temporary entry immediately
+		const tempGuid = `temp-${Date.now()}`;
+		scheduledMessages = [...scheduledMessages, {
+			guid: tempGuid, chatGuid, text, scheduledAt, scheduleType: 2, scheduleState: 1
+		}];
+
+		pendingMutations++;
+		try {
+			await fetch('/api/scheduled-messages', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ chatGuid, message: text, scheduledAt })
+			});
+		} finally {
+			pendingMutations--;
+			await fetchScheduledMessages();
+		}
 	}
 
 	async function handleEditScheduled(guid: string, message?: string, scheduledAt?: number) {
+		// Optimistic: update in place immediately
+		scheduledMessages = scheduledMessages.map((sm) =>
+			sm.guid === guid
+				? { ...sm, ...(message !== undefined && { text: message }), ...(scheduledAt !== undefined && { scheduledAt }) }
+				: sm
+		);
+
 		const body: Record<string, unknown> = { chatGuid };
 		if (message !== undefined) body.message = message;
 		if (scheduledAt !== undefined) body.scheduledAt = scheduledAt;
 
-		const res = await fetch(`/api/scheduled-messages/${encodeURIComponent(guid)}`, {
+		pendingMutations++;
+		fetch(`/api/scheduled-messages/${encodeURIComponent(guid)}`, {
 			method: 'PUT',
 			headers: { 'Content-Type': 'application/json' },
 			body: JSON.stringify(body)
-		});
-		if (res.ok) await fetchScheduledMessages();
+		}).then(() => fetchScheduledMessages()).finally(() => { pendingMutations--; });
 	}
 
 	async function handleDeleteScheduled(guid: string) {
-		const res = await fetch(
+		// Optimistic: remove immediately
+		scheduledMessages = scheduledMessages.filter((sm) => sm.guid !== guid);
+
+		pendingMutations++;
+		fetch(
 			`/api/scheduled-messages/${encodeURIComponent(guid)}?chatGuid=${encodeURIComponent(chatGuid)}`,
 			{ method: 'DELETE' }
-		);
-		if (res.ok) await fetchScheduledMessages();
+		).then(() => fetchScheduledMessages()).finally(() => { pendingMutations--; });
 	}
 
 	const handleMap = $derived(new Map(handles.map((h) => [h.address, h.displayName])));
@@ -237,6 +285,19 @@
 	const isGroup = $derived(chat?.style === 43);
 	const is1to1 = $derived(chat?.style === 45);
 	const participantAddress = $derived(is1to1 && chat?.participants?.length ? chat.participants[0] : null);
+
+	const friendHasLocation = $derived.by(() => {
+		if (!participantAddress) return false;
+		const friend = findMyStore.friends.find((f) => f.handle === participantAddress);
+		return friend !== null && friend !== undefined && friend.latitude !== null && friend.longitude !== null;
+	});
+
+	// Fetch Find My friends so we know whether to show the location button
+	$effect(() => {
+		if (participantAddress && findMyStore.friends.length === 0) {
+			findMyStore.fetchFriends();
+		}
+	});
 
 	const typingAddresses = $derived.by(() => {
 		if (!syncEngine) return [];
@@ -548,7 +609,7 @@
 			});
 			// Update chat preview if this was the latest message
 			if (msg && chat && msg.dateCreated >= chat.lastMessageDate) {
-				await db.chats.update(chatGuid, { lastMessageText: null });
+				await db.chats.update(chatGuid, { lastMessageText: 'You unsent a message' });
 			}
 		}
 	}
@@ -580,7 +641,7 @@
 			</span>
 		{/if}
 		<div class="ml-auto flex items-center gap-1">
-			{#if is1to1 && participantAddress}
+			{#if is1to1 && participantAddress && friendHasLocation}
 				<button
 					onclick={() => (showLocationPanel = !showLocationPanel)}
 					class="rounded-md p-1.5 text-gray-400 hover:bg-gray-100 hover:text-gray-600 dark:hover:bg-gray-800 dark:hover:text-gray-300"
@@ -604,7 +665,7 @@
 		<div
 			bind:this={scrollContainer}
 			onscroll={handleScroll}
-			class="flex flex-1 flex-col gap-0.5 overflow-y-auto px-4 py-3"
+			class="flex min-w-0 flex-1 flex-col gap-0.5 overflow-y-auto px-4 py-3"
 		>
 			{#if loadingOlder}
 				<div class="py-2 text-center text-xs text-gray-400">Loading older messages...</div>

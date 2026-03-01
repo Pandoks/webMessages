@@ -5,6 +5,7 @@
 	import ModeToggle from '$lib/components/ModeToggle.svelte';
 	import ThemeToggle from '$lib/components/ThemeToggle.svelte';
 	import { syncEngine } from '$lib/stores/sync.js';
+	import { visibilityStore } from '$lib/stores/visibility.svelte.js';
 	import faviconMessages from '$lib/assets/favicon-messages.svg';
 	import faviconFindmy from '$lib/assets/favicon-findmy.svg';
 
@@ -17,8 +18,12 @@
 	setContext('syncEngine', syncEngine);
 
 	onMount(() => {
+		visibilityStore.start();
 		syncEngine.start();
-		return () => syncEngine.stop();
+		return () => {
+			visibilityStore.stop();
+			syncEngine.stop();
+		};
 	});
 </script>
 
