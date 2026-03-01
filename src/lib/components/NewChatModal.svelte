@@ -35,7 +35,9 @@
 	});
 
 	$effect(() => {
-		const sub = liveQuery(() => db.chats.toArray()).subscribe((chats) => {
+		const sub = liveQuery(() =>
+			db.chats.orderBy('lastMessageDate').reverse().toArray()
+		).subscribe((chats) => {
 			allChats = chats;
 		});
 		return () => sub.unsubscribe();
@@ -250,44 +252,44 @@
 	}
 
 	function findExistingGroup(addresses: string[]): DbChat | null {
-		// Expand each address to all addresses for the same contact
-		const expandedSets: Set<string>[] = addresses.map((addr) => {
-			const set = new Set<string>([addr]);
-			const handle = handleByAddress.get(addr);
-			if (handle?.displayName) {
-				const siblings = handlesByName.get(handle.displayName);
-				if (siblings) {
-					for (const s of siblings) set.add(s.address);
-				}
-			}
-			return set;
-		});
+		// Compare by resolved display name (case-insensitive, sorted) instead of raw address.
+		// This handles: same person with different addresses across chats, participant ordering.
+		// When multiple chats match (duplicates), return the most recent one — matching
+		// ChatList's dedup behavior which keeps the highest lastMessageDate.
+		const selectedIdentities = addresses
+			.map((addr) => {
+				const handle = handleByAddress.get(addr);
+				return (handle?.displayName || addr).toLowerCase();
+			})
+			.sort();
+
+		let bestMatch: DbChat | null = null;
 
 		for (const chat of allChats) {
 			if (chat.style !== 43) continue;
 			if (chat.participants.length !== addresses.length) continue;
 
-			// Check if each participant matches one of the expanded sets
-			const usedSets = new Set<number>();
-			let allMatched = true;
-			for (const participant of chat.participants) {
-				let found = false;
-				for (let i = 0; i < expandedSets.length; i++) {
-					if (!usedSets.has(i) && expandedSets[i].has(participant)) {
-						usedSets.add(i);
-						found = true;
-						break;
-					}
-				}
-				if (!found) {
-					allMatched = false;
-					break;
+			const chatIdentities = chat.participants
+				.map((addr) => {
+					const handle = handleByAddress.get(addr);
+					return (handle?.displayName || addr).toLowerCase();
+				})
+				.sort();
+
+			if (selectedIdentities.every((id, i) => id === chatIdentities[i])) {
+				if (!bestMatch || chat.lastMessageDate > bestMatch.lastMessageDate) {
+					bestMatch = chat;
 				}
 			}
-			if (allMatched && usedSets.size === addresses.length) return chat;
 		}
-		return null;
+		return bestMatch;
 	}
+
+	// Reactively detect existing group chat when 2+ recipients selected
+	const existingGroupChat = $derived.by(() => {
+		if (selectedRecipients.length < 2) return null;
+		return findExistingGroup(selectedRecipients.map((r) => r.address));
+	});
 
 	// ── Actions ──
 
@@ -475,7 +477,7 @@
 	bind:this={dialogEl}
 	onclose={onClose}
 	onclick={handleBackdropClick}
-	class="m-auto w-full max-w-md rounded-2xl bg-white p-0 shadow-xl backdrop:bg-black/50 backdrop:backdrop-blur-sm dark:bg-gray-900"
+	class="m-auto w-full max-w-md overflow-visible rounded-2xl bg-white p-0 shadow-xl backdrop:bg-black/50 backdrop:backdrop-blur-sm dark:bg-gray-900"
 >
 	<div class="flex flex-col gap-4 p-5">
 		<!-- Header -->
@@ -648,15 +650,27 @@
 			<p class="text-sm text-red-500">{error}</p>
 		{/if}
 
-		<!-- Create Group button (2+ recipients) -->
+		<!-- Group action button (2+ recipients) -->
 		{#if selectedRecipients.length >= 2}
-			<button
-				onclick={createGroupChat}
-				disabled={creating}
-				class="rounded-lg bg-blue-500 px-4 py-2.5 text-sm font-medium text-white transition-opacity hover:bg-blue-600 disabled:opacity-40"
-			>
-				{creating ? 'Creating...' : `Create Group (${selectedRecipients.length})`}
-			</button>
+			{#if existingGroupChat}
+				<button
+					onclick={() => {
+						onClose();
+						goto(`/messages/${encodeURIComponent(existingGroupChat.guid)}`);
+					}}
+					class="rounded-lg bg-blue-500 px-4 py-2.5 text-sm font-medium text-white transition-opacity hover:bg-blue-600"
+				>
+					Go to Conversation
+				</button>
+			{:else}
+				<button
+					onclick={createGroupChat}
+					disabled={creating}
+					class="rounded-lg bg-blue-500 px-4 py-2.5 text-sm font-medium text-white transition-opacity hover:bg-blue-600 disabled:opacity-40"
+				>
+					{creating ? 'Creating...' : `Create Group (${selectedRecipients.length})`}
+				</button>
+			{/if}
 		{/if}
 	</div>
 </dialog>
