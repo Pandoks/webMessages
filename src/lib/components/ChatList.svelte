@@ -2,9 +2,7 @@
 	import { liveQuery } from 'dexie';
 	import { db } from '$lib/db/index.js';
 	import { page } from '$app/state';
-	import { goto } from '$app/navigation';
 	import ChatListItem from './ChatListItem.svelte';
-	import ChatContextMenu from './ChatContextMenu.svelte';
 	import NewChatModal from './NewChatModal.svelte';
 	import { getChatDisplayName, formatPhoneNumber } from '$lib/utils/format.js';
 	import type { DbChat, DbHandle } from '$lib/db/types.js';
@@ -13,18 +11,6 @@
 	let newChatOpen = $state(false);
 	let allChats = $state<DbChat[]>([]);
 	let allHandles = $state<DbHandle[]>([]);
-
-	let contextMenu = $state<{
-		x: number;
-		y: number;
-		chat: DbChat;
-	} | null>(null);
-
-	let confirmDialog = $state<{
-		title: string;
-		message: string;
-		onConfirm: () => void;
-	} | null>(null);
 
 	// Subscribe to liveQuery via $effect
 	$effect(() => {
@@ -146,95 +132,6 @@
 		return siblings?.includes(activeChatGuid) ?? false;
 	}
 
-	async function handlePin(chat: DbChat) {
-		const newPinned = !chat.isPinned;
-		// Optimistic update
-		await db.chats.update(chat.guid, { isPinned: newPinned });
-		try {
-			const res = await fetch('/api/plist/pinned', {
-				method: 'POST',
-				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ chatIdentifier: chat.chatIdentifier, pinned: newPinned })
-			});
-			if (!res.ok) {
-				await db.chats.update(chat.guid, { isPinned: !newPinned });
-			}
-		} catch {
-			// Revert on failure
-			await db.chats.update(chat.guid, { isPinned: !newPinned });
-		}
-	}
-
-	async function handleToggleRead(chat: DbChat) {
-		const allGuids = siblingGuidsMap.get(chat.guid) ?? [chat.guid];
-		const markRead = chat.unreadCount > 0;
-		// Optimistic update
-		for (const guid of allGuids) {
-			await db.chats.update(guid, { unreadCount: markRead ? 0 : 1 });
-		}
-		// Write directly to chat.db (bypasses imessage-rs Private API requirement)
-		for (const guid of allGuids) {
-			try {
-				const res = await fetch('/api/chat-read', {
-					method: 'POST',
-					headers: { 'Content-Type': 'application/json' },
-					body: JSON.stringify({ guid, read: markRead })
-				});
-				if (!res.ok) {
-					// Revert on failure
-					await db.chats.update(guid, { unreadCount: markRead ? 1 : 0 });
-				}
-			} catch {
-				await db.chats.update(guid, { unreadCount: markRead ? 1 : 0 });
-			}
-		}
-	}
-
-	function handleDelete(chat: DbChat) {
-		confirmDialog = {
-			title: 'Delete Conversation',
-			message: 'This conversation will be removed from your Messages app too. This cannot be undone.',
-			onConfirm: async () => {
-				confirmDialog = null;
-				const allGuids = siblingGuidsMap.get(chat.guid) ?? [chat.guid];
-
-				// Navigate away if active
-				if (allGuids.some((g) => isChatActive(g))) {
-					await goto('/messages');
-				}
-
-				// Delete via API first, then remove from IndexedDB
-				for (const guid of allGuids) {
-					try {
-						const res = await fetch(`/api/proxy/chat/${encodeURIComponent(guid)}`, { method: 'DELETE' });
-						if (res.ok || res.status === 404) {
-							// 404 means already deleted — clean up local state too
-							await db.messages.where('chatGuid').equals(guid).delete();
-							await db.chats.delete(guid);
-						}
-					} catch {
-						// Network error — don't delete locally
-					}
-				}
-			}
-		};
-	}
-
-	function handleLeave(chat: DbChat) {
-		confirmDialog = {
-			title: 'Leave Conversation',
-			message: "You won't receive new messages from this group.",
-			onConfirm: async () => {
-				confirmDialog = null;
-				if (isChatActive(chat.guid)) {
-					await goto('/messages');
-				}
-				await db.messages.where('chatGuid').equals(chat.guid).delete();
-				await db.chats.delete(chat.guid);
-				fetch(`/api/proxy/chat/${encodeURIComponent(chat.guid)}/leave`, { method: 'POST' }).catch(() => {});
-			}
-		};
-	}
 
 </script>
 
@@ -277,8 +174,7 @@
 					isActive={isChatActive(chat.guid)}
 					isPinned={chat.isPinned}
 					participants={chatParticipants}
-					oncontextmenu={(e) => { contextMenu = { x: e.clientX, y: e.clientY, chat }; }}
-				/>
+					/>
 			{/each}
 		</div>
 	{/if}
@@ -301,7 +197,6 @@
 				isActive={isChatActive(chat.guid)}
 				isPinned={false}
 				participants={chatParticipants}
-				oncontextmenu={(e) => { contextMenu = { x: e.clientX, y: e.clientY, chat }; }}
 			/>
 		{:else}
 			<p class="p-4 text-center text-sm text-gray-400">No conversations</p>
@@ -310,43 +205,3 @@
 </div>
 
 <NewChatModal open={newChatOpen} onClose={() => (newChatOpen = false)} />
-
-{#if contextMenu}
-	<ChatContextMenu
-		x={contextMenu.x}
-		y={contextMenu.y}
-		isPinned={contextMenu.chat.isPinned}
-		isGroup={contextMenu.chat.style === 43}
-		hasUnread={contextMenu.chat.unreadCount > 0}
-		onPin={() => handlePin(contextMenu!.chat)}
-		onDelete={() => handleDelete(contextMenu!.chat)}
-		onToggleRead={() => handleToggleRead(contextMenu!.chat)}
-		onLeave={() => handleLeave(contextMenu!.chat)}
-		onClose={() => { contextMenu = null; }}
-	/>
-{/if}
-
-{#if confirmDialog}
-	<!-- svelte-ignore a11y_no_static_element_interactions -->
-	<div class="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onclick={() => { confirmDialog = null; }}>
-		<!-- svelte-ignore a11y_no_static_element_interactions -->
-		<div class="mx-4 w-full max-w-sm rounded-2xl bg-white p-6 shadow-xl dark:bg-gray-800" onclick={(e) => e.stopPropagation()}>
-			<h3 class="text-lg font-semibold dark:text-white">{confirmDialog.title}</h3>
-			<p class="mt-2 text-sm text-gray-500 dark:text-gray-400">{confirmDialog.message}</p>
-			<div class="mt-4 flex justify-end gap-2">
-				<button
-					onclick={() => { confirmDialog = null; }}
-					class="rounded-lg px-4 py-2 text-sm text-gray-700 transition-colors hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700"
-				>
-					Cancel
-				</button>
-				<button
-					onclick={confirmDialog.onConfirm}
-					class="rounded-lg bg-red-500 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-red-600"
-				>
-					{confirmDialog.title.startsWith('Leave') ? 'Leave' : 'Delete'}
-				</button>
-			</div>
-		</div>
-	</div>
-{/if}
