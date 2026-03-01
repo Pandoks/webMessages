@@ -51,28 +51,19 @@ if action == "pin" {
     newPinned.removeAll { $0 == chatIdentifier }
     newPinned.insert(chatIdentifier, at: 0)
 } else {
-    // unpin: remove all occurrences
-    let before = newPinned.count
+    // unpin: remove all occurrences (idempotent -- no error if already absent)
     newPinned.removeAll { $0 == chatIdentifier }
-    if newPinned.count == before {
-        fputs("Error: chat '\(chatIdentifier)' is not pinned\n", stderr)
-        exit(1)
-    }
 }
 
 // Build the dictionary to write back
 let newDict: NSDictionary = ["pP": newPinned, "pV": currentVersion]
 
 // Try the IMCore setter method first
-let setterSel = NSSelectorFromString("setPinnedConversationIdentifiers:inLocalStore:")
-let setterSel2 = NSSelectorFromString("setPinnedConversationIdentifiersInLocalStore:")
+let setterSel = NSSelectorFromString("setPinnedConversationIdentifiersInLocalStore:")
 
 var wrote = false
 
-if instance.responds(to: setterSel2) {
-    _ = instance.perform(setterSel2, with: newDict)
-    wrote = true
-} else if instance.responds(to: setterSel) {
+if instance.responds(to: setterSel) {
     _ = instance.perform(setterSel, with: newDict)
     wrote = true
 }
