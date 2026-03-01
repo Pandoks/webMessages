@@ -460,7 +460,9 @@ export class SyncEngine {
 
 			// Step 2: Insert new handle entries for AddressBook contacts not already in Dexie
 			const existingAddresses = new Set(
-				(await db.handles.toCollection().primaryKeys()) as string[]
+				((await db.handles.toCollection().primaryKeys()) as string[]).map(
+					(addr) => addr.replace(/[\s\-()]/g, '').toLowerCase()
+				)
 			);
 
 			// Deduplicate by displayName: prefer phone over email
@@ -494,7 +496,9 @@ export class SyncEngine {
 			}
 
 			if (newHandles.length) {
-				await db.handles.bulkPut(newHandles);
+				await db.transaction('rw', db.handles, async () => {
+					await db.handles.bulkPut(newHandles);
+				});
 			}
 		} catch {
 			// AddressBook not available — mark as resolved with empty name
