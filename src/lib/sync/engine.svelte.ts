@@ -15,6 +15,7 @@ export class SyncEngine {
 	private sse = new SSEClient();
 	private syncedChatGuids = new Set<string>();
 	private chatMessageSyncPromises = new Map<string, Promise<void>>();
+	private periodicSyncInterval: ReturnType<typeof setInterval> | null = null;
 
 	async start() {
 		this.sse.onEvent((type, data) => this.handleEvent(type, data));
@@ -27,9 +28,15 @@ export class SyncEngine {
 		} else {
 			await this.initialSync();
 		}
+
+		this.periodicSyncInterval = setInterval(() => this.periodicSync(), 8000);
 	}
 
 	stop() {
+		if (this.periodicSyncInterval) {
+			clearInterval(this.periodicSyncInterval);
+			this.periodicSyncInterval = null;
+		}
 		this.sse.disconnect();
 		this.connected = false;
 	}
@@ -586,6 +593,39 @@ export class SyncEngine {
 			});
 		} catch {
 			// Silently fail — plist may not be accessible
+		}
+	}
+
+	private async periodicSync() {
+		await Promise.allSettled([
+			this.syncPinnedChats(),
+			this.syncUnreadCounts(),
+			this.detectDeletedChats()
+		]);
+	}
+
+	private async detectDeletedChats() {
+		try {
+			const chatRes = await proxyPost<Chat[]>('/api/proxy/chat/query', {
+				with: ['participants'],
+				sort: 'lastmessage',
+				limit: 1000
+			});
+			if (!chatRes.data) return;
+
+			const apiGuids = new Set(chatRes.data.map((c) => c.guid));
+			const localChats = await db.chats.toArray();
+
+			await db.transaction('rw', [db.chats, db.messages], async () => {
+				for (const local of localChats) {
+					if (!apiGuids.has(local.guid)) {
+						await db.messages.where('chatGuid').equals(local.guid).delete();
+						await db.chats.delete(local.guid);
+					}
+				}
+			});
+		} catch {
+			// Silently fail
 		}
 	}
 
