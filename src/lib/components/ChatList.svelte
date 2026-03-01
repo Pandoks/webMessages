@@ -151,11 +151,14 @@
 		// Optimistic update
 		await db.chats.update(chat.guid, { isPinned: newPinned });
 		try {
-			await fetch('/api/plist/pinned', {
+			const res = await fetch('/api/plist/pinned', {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({ chatIdentifier: chat.chatIdentifier, pinned: newPinned })
 			});
+			if (!res.ok) {
+				await db.chats.update(chat.guid, { isPinned: !newPinned });
+			}
 		} catch {
 			// Revert on failure
 			await db.chats.update(chat.guid, { isPinned: !newPinned });
@@ -193,7 +196,7 @@
 
 				// Navigate away if active
 				if (allGuids.some((g) => isChatActive(g))) {
-					goto('/messages');
+					await goto('/messages');
 				}
 
 				// Delete from IndexedDB and API
@@ -213,7 +216,7 @@
 			onConfirm: async () => {
 				confirmDialog = null;
 				if (isChatActive(chat.guid)) {
-					goto('/messages');
+					await goto('/messages');
 				}
 				await db.messages.where('chatGuid').equals(chat.guid).delete();
 				await db.chats.delete(chat.guid);
