@@ -44,23 +44,23 @@
 	});
 
 	function handlePin() {
-		onClose();
 		onPin();
+		onClose();
 	}
 
 	function handleToggleRead() {
-		onClose();
 		onToggleRead();
+		onClose();
 	}
 
 	function handleLeave() {
-		onClose();
 		onLeave();
+		onClose();
 	}
 
 	function handleDelete() {
-		onClose();
 		onDelete();
+		onClose();
 	}
 </script>
 
