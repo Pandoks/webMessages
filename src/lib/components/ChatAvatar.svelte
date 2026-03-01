@@ -14,7 +14,7 @@
 	const containerSizes = { sm: 'h-8 w-8', md: 'h-10 w-10', lg: 'h-12 w-12' };
 	const singleSizes = { sm: 'h-8 w-8 text-xs', md: 'h-10 w-10 text-sm', lg: 'h-12 w-12 text-base' };
 	const dualSizes = { sm: 'h-5 w-5 text-[8px]', md: 'h-6 w-6 text-[9px]', lg: 'h-7 w-7 text-[10px]' };
-	const quadSizes = { sm: 'h-[14px] w-[14px] text-[6px]', md: 'h-4 w-4 text-[7px]', lg: 'h-5 w-5 text-[8px]' };
+	const quadSizes = { sm: 'h-[18px] w-[18px] text-[7px]', md: 'h-[22px] w-[22px] text-[8px]', lg: 'h-[26px] w-[26px] text-[9px]' };
 
 	// Color palette for initials backgrounds
 	const colors = [
@@ -109,19 +109,39 @@
 			</div>
 		{/each}
 	</div>
-{:else}
-	<!-- 4+ contacts: 2x2 grid -->
-	<div class="relative grid shrink-0 grid-cols-2 gap-px overflow-hidden rounded-full {containerSizes[size]}">
-		{#each displayParticipants.slice(0, 4) as p}
-			{#if p.avatar}
-				<img src={p.avatar} alt={p.name} class="object-cover {quadSizes[size]}" />
-			{:else}
-				<div
-					class="flex items-center justify-center font-bold text-white {quadSizes[size]} {getColor(p.name)}"
-				>
-					{getInitials(p.name)?.[0] || '?'}
-				</div>
-			{/if}
+{:else if displayParticipants.length === 4 && participants.length === 4}
+	<!-- Exactly 4 contacts: 2x2 arrangement of circles -->
+	<div class="relative shrink-0 {containerSizes[size]}">
+		{#each displayParticipants as p, i}
+			<div class="absolute {i === 0 ? 'left-0 top-0' : i === 1 ? 'right-0 top-0' : i === 2 ? 'bottom-0 left-0' : 'bottom-0 right-0'}">
+				{#if p.avatar}
+					<img src={p.avatar} alt={p.name} class="rounded-full object-cover {quadSizes[size]}" />
+				{:else}
+					<div class="flex items-center justify-center rounded-full font-bold text-white {quadSizes[size]} {getColor(p.name)}">
+						{getInitials(p.name)?.[0] || '?'}
+					</div>
+				{/if}
+			</div>
 		{/each}
+	</div>
+{:else}
+	<!-- 5+ contacts: 3 circles + "+N" badge -->
+	<div class="relative shrink-0 {containerSizes[size]}">
+		{#each displayParticipants.slice(0, 3) as p, i}
+			<div class="absolute {i === 0 ? 'left-0 top-0' : i === 1 ? 'right-0 top-0' : 'bottom-0 left-0'}">
+				{#if p.avatar}
+					<img src={p.avatar} alt={p.name} class="rounded-full object-cover {quadSizes[size]}" />
+				{:else}
+					<div class="flex items-center justify-center rounded-full font-bold text-white {quadSizes[size]} {getColor(p.name)}">
+						{getInitials(p.name)?.[0] || '?'}
+					</div>
+				{/if}
+			</div>
+		{/each}
+		<div class="absolute bottom-0 right-0">
+			<div class="flex items-center justify-center rounded-full bg-gray-400 font-bold text-white dark:bg-gray-600 {quadSizes[size]}">
+				+{participants.length - 3}
+			</div>
+		</div>
 	</div>
 {/if}
