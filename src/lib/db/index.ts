@@ -114,6 +114,20 @@ export class WebMessagesDB extends Dexie {
 				await tx.table('messages').clear();
 				await tx.table('syncMeta').clear();
 			});
+
+		// v9: Re-resolve contacts with SQLite-backed AddressBook + photos
+		this.version(9)
+			.stores({
+				chats: 'guid, chatIdentifier, lastMessageDate, isPinned',
+				messages: 'guid, chatGuid, dateCreated, associatedMessageGuid, threadOriginatorGuid',
+				handles: 'address',
+				attachments: 'guid, messageGuid',
+				syncMeta: 'key'
+			})
+			.upgrade(async (tx) => {
+				await tx.table('handles').clear();
+				await tx.table('syncMeta').clear();
+			});
 	}
 }
 

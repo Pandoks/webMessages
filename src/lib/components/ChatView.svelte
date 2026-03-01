@@ -3,6 +3,7 @@
 	import { db } from '$lib/db/index.js';
 	import type { DbMessage, DbAttachment, DbChat, DbHandle } from '$lib/db/types.js';
 	import type { SyncEngine } from '$lib/sync/engine.svelte.js';
+	import type { ScheduledMessage } from '$lib/types/index.js';
 	import MessageBubble from './MessageBubble.svelte';
 	import MessageInput from './MessageInput.svelte';
 	import LocationPanel from './LocationPanel.svelte';
@@ -160,10 +161,11 @@
 		return () => sub.unsubscribe();
 	});
 
-	// Mark as read when viewing
+	// Mark as read when viewing — clear locally + send read receipt via imessage-rs
 	$effect(() => {
 		if (chat && chat.unreadCount > 0) {
 			db.chats.update(chatGuid, { unreadCount: 0 });
+			fetch(`/api/proxy/chat/${encodeURIComponent(chatGuid)}/read`, { method: 'POST' });
 		}
 	});
 
@@ -173,8 +175,57 @@
 		replyTo = null;
 	});
 
-	const regularMessages = $derived(messages.filter((m) => m.dateCreated <= Date.now()));
-	const scheduledMessages = $derived(messages.filter((m) => m.dateCreated > Date.now()));
+	let scheduledMessages = $state<ScheduledMessage[]>([]);
+
+	async function fetchScheduledMessages() {
+		try {
+			const res = await fetch(`/api/scheduled-messages?chatGuid=${encodeURIComponent(chatGuid)}`);
+			if (res.ok) {
+				const { data } = await res.json();
+				scheduledMessages = data;
+			}
+		} catch {
+			// Silent fail — will retry on next poll
+		}
+	}
+
+	// Poll scheduled messages every 5s, re-fetch when chatGuid changes
+	$effect(() => {
+		void chatGuid;
+		fetchScheduledMessages();
+		const interval = setInterval(fetchScheduledMessages, 5000);
+		return () => clearInterval(interval);
+	});
+
+	async function handleScheduleSend(text: string, scheduledAt: number) {
+		const res = await fetch('/api/scheduled-messages', {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({ chatGuid, message: text, scheduledAt })
+		});
+		if (res.ok) await fetchScheduledMessages();
+	}
+
+	async function handleEditScheduled(guid: string, message?: string, scheduledAt?: number) {
+		const body: Record<string, unknown> = { chatGuid };
+		if (message !== undefined) body.message = message;
+		if (scheduledAt !== undefined) body.scheduledAt = scheduledAt;
+
+		const res = await fetch(`/api/scheduled-messages/${encodeURIComponent(guid)}`, {
+			method: 'PUT',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify(body)
+		});
+		if (res.ok) await fetchScheduledMessages();
+	}
+
+	async function handleDeleteScheduled(guid: string) {
+		const res = await fetch(
+			`/api/scheduled-messages/${encodeURIComponent(guid)}?chatGuid=${encodeURIComponent(chatGuid)}`,
+			{ method: 'DELETE' }
+		);
+		if (res.ok) await fetchScheduledMessages();
+	}
 
 	const handleMap = $derived(new Map(handles.map((h) => [h.address, h.displayName])));
 
@@ -225,7 +276,7 @@
 	// Auto-scroll to bottom on new messages (only if already near bottom)
 	$effect(() => {
 		// Track messages length to trigger effect on new messages
-		void regularMessages.length;
+		void messages.length;
 
 		if (wasNearBottom && scrollContainer) {
 			// Use tick-like delay to ensure DOM is updated
@@ -246,19 +297,19 @@
 		wasNearBottom = scrollHeight - scrollTop - clientHeight < 100;
 
 		// Load older messages when scrolled near top
-		if (scrollTop < 50 && !loadingOlder && hasMoreOlder && regularMessages.length > 0) {
+		if (scrollTop < 50 && !loadingOlder && hasMoreOlder && messages.length > 0) {
 			loadOlderMessages();
 		}
 	}
 
 	async function loadOlderMessages() {
-		if (!syncEngine || loadingOlder || regularMessages.length === 0) return;
+		if (!syncEngine || loadingOlder || messages.length === 0) return;
 
 		loadingOlder = true;
 		const prevScrollHeight = scrollContainer?.scrollHeight ?? 0;
 
 		try {
-			const oldestDate = regularMessages[0].dateCreated;
+			const oldestDate = messages[0].dateCreated;
 			// Load older messages from all sibling chats
 			const counts = await Promise.all(
 				allChatGuids.map((g) => syncEngine!.loadOlderMessages(g, oldestDate))
@@ -285,7 +336,6 @@
 		const body: Record<string, string> = {
 			chatGuid,
 			message: text,
-			method: 'apple-script',
 			tempGuid
 		};
 		if (replyTo) {
@@ -346,7 +396,6 @@
 			const tempGuid = crypto.randomUUID();
 			const formData = new FormData();
 			formData.append('chatGuid', chatGuid);
-			formData.append('method', 'apple-script');
 			formData.append('tempGuid', tempGuid);
 			if (i === 0 && replyToGuid) formData.append('selectedMessageGuid', replyToGuid);
 			formData.append('attachment', files[i]);
@@ -561,7 +610,7 @@
 				<div class="py-2 text-center text-xs text-gray-400">Loading older messages...</div>
 			{/if}
 
-			{#each regularMessages as message (message.guid)}
+			{#each messages as message (message.guid)}
 				<MessageBubble
 					{message}
 					attachments={attachmentMap.get(message.guid) ?? []}
@@ -607,18 +656,45 @@
 				</div>
 
 				{#if showScheduled}
-					{#each scheduledMessages as message (message.guid)}
+					{#each scheduledMessages as sm (sm.guid)}
 						<MessageBubble
-							{message}
-							attachments={attachmentMap.get(message.guid) ?? []}
-							senderName={getSenderName(message)}
-							showSender={isGroup}
-							reactions={reactionMap.get(message.guid) ?? []}
+							message={{
+								guid: sm.guid,
+								chatGuid: sm.chatGuid,
+								text: sm.text,
+								handleId: 0,
+								handleAddress: null,
+								isFromMe: true,
+								dateCreated: sm.scheduledAt,
+								dateRead: null,
+								dateDelivered: null,
+								dateEdited: null,
+								dateRetracted: null,
+								subject: null,
+								associatedMessageGuid: null,
+								associatedMessageType: 0,
+								associatedMessageEmoji: null,
+								threadOriginatorGuid: null,
+								attachmentGuids: [],
+								error: 0,
+								expressiveSendStyleId: null,
+								isDelivered: false,
+								groupTitle: null,
+								groupActionType: 0,
+								isSystemMessage: false,
+								itemType: 0
+							}}
+							attachments={[]}
+							senderName="Me"
+							showSender={false}
+							reactions={[]}
 							onReact={handleReact}
 							onReply={handleReplyTo}
 							onEdit={handleEdit}
 							onUnsend={handleUnsend}
-							replyToText={getReplyToText(message)}
+							replyToText={null}
+							onEditSchedule={(guid) => handleEditScheduled(guid)}
+							onCancelSchedule={(guid) => handleDeleteScheduled(guid)}
 						/>
 					{/each}
 				{/if}
@@ -652,5 +728,6 @@
 		onTypingStop={handleTypingStop}
 		{replyTo}
 		onCancelReply={handleCancelReply}
+		onScheduleSend={handleScheduleSend}
 	/>
 </div>

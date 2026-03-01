@@ -9,28 +9,40 @@
 
 	onMount(() => {
 		findMyStore.fetchAll();
+		findMyStore.fetchMyLocation();
 	});
 
-	// Find the selected device or friend
+	// Find the selected device, friend, or "Me"
 	const selectedItem = $derived.by(() => {
 		if (!selectedId) return null;
-		const device = findMyStore.devices.find((d) => d.id === selectedId);
-		if (device) return { type: 'device' as const, ...device };
-		const friend = findMyStore.friends.find((f) => f.id === selectedId);
-		if (friend)
+		if (selectedId === '__me__' && findMyStore.myLocation) {
+			const my = findMyStore.myLocation;
 			return {
 				type: 'friend' as const,
-				name: [friend.firstName, friend.lastName].filter(Boolean).join(' ') || friend.handle,
-				...friend
+				name: my.name,
+				handle: '__me__',
+				displayName: my.name,
+				latitude: my.latitude,
+				longitude: my.longitude,
+				address: my.address,
+				locationTimestamp: my.timestamp,
+				locatingInProgress: false,
+				avatarBase64: null
 			};
+		}
+		const device = findMyStore.devices.find((d) => d.id === selectedId);
+		if (device) return { type: 'device' as const, ...device };
+		const friend = findMyStore.friends.find((f) => f.handle === selectedId);
+		if (friend) return { type: 'friend' as const, name: friend.displayName, ...friend };
 		return null;
 	});
 </script>
 
-<div class="flex h-full">
+<div class="flex h-full w-full">
 	<FindMySidebar
 		devices={findMyStore.devices}
 		friends={findMyStore.friends}
+		myLocation={findMyStore.myLocation}
 		{selectedId}
 		onSelect={(id) => (selectedId = id)}
 		starred={findMyStore.starred}
@@ -40,6 +52,7 @@
 		<FindMyMap
 			devices={findMyStore.devices}
 			friends={findMyStore.friends}
+			myLocation={findMyStore.myLocation}
 			{selectedId}
 			onSelect={(id) => (selectedId = id)}
 		/>
@@ -68,7 +81,8 @@
 			latitude={selectedItem.latitude}
 			longitude={selectedItem.longitude}
 			lastUpdated={selectedItem.locationTimestamp}
-			batteryLevel={selectedItem.type === 'device' ? selectedItem.batteryLevel : null}
+			myLatitude={findMyStore.myLocation?.latitude ?? null}
+			myLongitude={findMyStore.myLocation?.longitude ?? null}
 			onClose={() => (selectedId = null)}
 		/>
 	{/if}

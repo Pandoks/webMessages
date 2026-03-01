@@ -3,6 +3,7 @@ import { chatToDb, messageToDb, handleToDb, attachmentToDb } from '$lib/sync/tra
 import type { Chat, Message, Handle } from '$lib/types/index.js';
 import type { ApiResponse } from '$lib/types/index.js';
 import { SSEClient } from '$lib/sync/sse.js';
+import { findMyStore } from '$lib/stores/findmy.svelte.js';
 
 const MESSAGES_PER_CHAT = 50;
 
@@ -289,6 +290,11 @@ export class SyncEngine {
 				break;
 			}
 
+			case 'new-findmy-location': {
+				findMyStore.applyLocationUpdate(data);
+				break;
+			}
+
 			case 'participant-added':
 			case 'participant-removed':
 			case 'participant-left': {
@@ -389,84 +395,36 @@ export class SyncEngine {
 		const handles = await db.handles.filter((h) => !h.displayName).toArray();
 		if (!handles.length) return;
 
-		// Step 1: Bulk-load contacts from macOS Contacts.app
 		try {
 			const res = await fetch('/api/contacts');
-			if (res.ok) {
-				const { data } = (await res.json()) as { data: Record<string, string> };
-				if (data && typeof data === 'object') {
-					await db.transaction('rw', db.handles, async () => {
-						for (const h of handles) {
-							const normalized = h.address.replace(/[\s\-()]/g, '').toLowerCase();
-							const name = data[normalized];
-							if (name) {
-								await db.handles.update(h.address, { displayName: name });
-							}
-						}
-					});
-				}
-			}
-		} catch {
-			// Contacts.app not available — continue to fallback
-		}
+			if (!res.ok) return;
 
-		// Step 2: For any remaining unresolved handles, try imessage-rs API
-		const remaining = await db.handles.filter((h) => h.displayName === null).toArray();
-		if (!remaining.length) return;
+			const { data, photos } = (await res.json()) as {
+				data: Record<string, string>;
+				photos: Record<string, string>;
+			};
 
-		// Probe first handle to check if the iCloud contact API is available
-		try {
-			const probeRes = await fetch(
-				`/api/proxy/icloud/contact?address=${encodeURIComponent(remaining[0].address)}`
-			);
-			if (!probeRes.ok) {
-				await db.transaction('rw', db.handles, async () => {
-					for (const h of remaining) {
-						await db.handles.update(h.address, { displayName: '' });
-					}
-				});
-				return;
-			}
-		} catch {
 			await db.transaction('rw', db.handles, async () => {
-				for (const h of remaining) {
+				for (const h of handles) {
+					const normalized = h.address.replace(/[\s\-()]/g, '').toLowerCase();
+					const name = data?.[normalized];
+					const avatar = photos?.[normalized];
+					const updates: Record<string, string> = {
+						displayName: name || ''
+					};
+					if (avatar) {
+						updates.avatarBase64 = avatar;
+					}
+					await db.handles.update(h.address, updates);
+				}
+			});
+		} catch {
+			// AddressBook not available — mark as resolved with empty name
+			await db.transaction('rw', db.handles, async () => {
+				for (const h of handles) {
 					await db.handles.update(h.address, { displayName: '' });
 				}
 			});
-			return;
-		}
-
-		const BATCH_SIZE = 25;
-		for (let i = 0; i < remaining.length; i += BATCH_SIZE) {
-			const batch = remaining.slice(i, i + BATCH_SIZE);
-			const results = await Promise.allSettled(
-				batch.map(async (h) => {
-					const res = await fetch(
-						`/api/proxy/icloud/contact?address=${encodeURIComponent(h.address)}`
-					);
-					if (!res.ok) return null;
-					return res.json();
-				})
-			);
-
-			for (let j = 0; j < results.length; j++) {
-				const result = results[j];
-				if (result.status === 'fulfilled' && result.value?.data) {
-					const data = result.value.data as {
-						name?: string | null;
-						avatar?: string | null;
-					};
-					const updates: Record<string, string> = {
-						displayName: data.name || ''
-					};
-					if (data.avatar) {
-						updates.avatarBase64 = data.avatar;
-					}
-					await db.handles.update(batch[j].address, updates);
-				} else {
-					await db.handles.update(batch[j].address, { displayName: '' });
-				}
-			}
 		}
 	}
 

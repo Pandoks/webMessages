@@ -26,7 +26,7 @@
 
 	const friendName = $derived.by(() => {
 		if (!friend) return '';
-		return [friend.firstName, friend.lastName].filter(Boolean).join(' ') || friend.handle;
+		return friend.displayName;
 	});
 
 	const relativeTime = $derived.by(() => {

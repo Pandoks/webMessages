@@ -105,18 +105,20 @@ export interface FindMyDevice {
 	locationTimestamp: number | null;
 	isLocating: boolean;
 	modelDisplayName: string | null;
+	deviceDisplayName: string | null;
+	deviceClass: string | null;
+	isConsideredAccessory: boolean;
 }
 
 export interface FindMyFriend {
-	id: string;
 	handle: string;
-	firstName: string | null;
-	lastName: string | null;
+	displayName: string;
 	latitude: number | null;
 	longitude: number | null;
 	address: string | null;
 	locationTimestamp: number | null;
 	locatingInProgress: boolean;
+	avatarBase64: string | null;
 }
 
 export interface ApiResponse<T> {
@@ -128,4 +130,13 @@ export interface ApiResponse<T> {
 export interface WebhookEvent {
 	type: string;
 	data: unknown;
+}
+
+export interface ScheduledMessage {
+	guid: string;
+	chatGuid: string;
+	text: string | null;
+	scheduledAt: number; // Unix ms
+	scheduleType: number; // 2 = scheduled
+	scheduleState: number; // 1 = pending
 }

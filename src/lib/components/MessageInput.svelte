@@ -10,9 +10,10 @@
 		onTypingStop: () => void;
 		replyTo?: { guid: string; text: string | null; senderName: string } | null;
 		onCancelReply?: () => void;
+		onScheduleSend?: (text: string, scheduledAt: number) => Promise<void>;
 	}
 
-	let { chatGuid, onSend, onSendAttachment, onTypingStart, onTypingStop, replyTo = null, onCancelReply = () => {} }: Props = $props();
+	let { chatGuid, onSend, onSendAttachment, onTypingStart, onTypingStop, replyTo = null, onCancelReply = () => {}, onScheduleSend }: Props = $props();
 
 	let text = $state('');
 	let sending = $state(false);
@@ -21,6 +22,54 @@
 	let textareaEl: HTMLTextAreaElement | undefined = $state();
 	let fileInputEl: HTMLInputElement | undefined = $state();
 	let pendingFiles = $state<File[]>([]);
+	let showSchedulePopover = $state(false);
+	let scheduleDate = $state('');
+	let scheduleTime = $state('09:00');
+	let popoverEl: HTMLDivElement | undefined = $state();
+
+	function getDefaultScheduleDate(): string {
+		const tomorrow = new Date();
+		tomorrow.setDate(tomorrow.getDate() + 1);
+		return tomorrow.toISOString().split('T')[0];
+	}
+
+	function getTodayStr(): string {
+		return new Date().toISOString().split('T')[0];
+	}
+
+	function toggleSchedulePopover() {
+		showSchedulePopover = !showSchedulePopover;
+		if (showSchedulePopover) {
+			scheduleDate = getDefaultScheduleDate();
+			scheduleTime = '09:00';
+		}
+	}
+
+	function handlePopoverClickOutside(e: MouseEvent) {
+		if (popoverEl && !popoverEl.contains(e.target as Node)) {
+			showSchedulePopover = false;
+		}
+	}
+
+	async function scheduleSend() {
+		const trimmed = text.trim();
+		if (!trimmed || !onScheduleSend || !scheduleDate || !scheduleTime) return;
+
+		const scheduledAt = new Date(`${scheduleDate}T${scheduleTime}`).getTime();
+		if (scheduledAt <= Date.now()) return;
+
+		showSchedulePopover = false;
+		await onScheduleSend(trimmed, scheduledAt);
+		text = '';
+		if (textareaEl) textareaEl.style.height = 'auto';
+	}
+
+	$effect(() => {
+		if (showSchedulePopover) {
+			document.addEventListener('mousedown', handlePopoverClickOutside);
+			return () => document.removeEventListener('mousedown', handlePopoverClickOutside);
+		}
+	});
 
 	function resetTypingTimer() {
 		if (typingTimer) clearTimeout(typingTimer);
@@ -218,22 +267,64 @@
 			class="max-h-32 flex-1 resize-none rounded-2xl bg-gray-100 px-4 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500 dark:bg-gray-800 dark:text-white"
 		></textarea>
 
-		<button
-			onclick={send}
-			disabled={(!text.trim() && pendingFiles.length === 0) || sending}
-			class="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-blue-500 text-white transition-opacity disabled:opacity-40"
-			aria-label="Send message"
-		>
-			<svg
-				xmlns="http://www.w3.org/2000/svg"
-				class="h-4 w-4"
-				fill="none"
-				viewBox="0 0 24 24"
-				stroke="currentColor"
-				stroke-width="2"
+		<div class="relative flex shrink-0">
+			<button
+				onclick={send}
+				disabled={(!text.trim() && pendingFiles.length === 0) || sending}
+				class="flex h-9 items-center justify-center rounded-l-full bg-blue-500 pl-3 text-white transition-opacity disabled:opacity-40 {onScheduleSend ? 'pr-1' : 'rounded-r-full pr-3'}"
+				aria-label="Send message"
 			>
-				<path stroke-linecap="round" stroke-linejoin="round" d="M5 12h14M12 5l7 7-7 7" />
-			</svg>
-		</button>
+				<svg
+					xmlns="http://www.w3.org/2000/svg"
+					class="h-4 w-4"
+					fill="none"
+					viewBox="0 0 24 24"
+					stroke="currentColor"
+					stroke-width="2"
+				>
+					<path stroke-linecap="round" stroke-linejoin="round" d="M5 12h14M12 5l7 7-7 7" />
+				</svg>
+			</button>
+			{#if onScheduleSend}
+				<button
+					onclick={toggleSchedulePopover}
+					disabled={!text.trim() || sending}
+					class="flex h-9 w-6 items-center justify-center rounded-r-full border-l border-blue-400 bg-blue-500 text-white transition-opacity disabled:opacity-40"
+					aria-label="Schedule send"
+				>
+					<svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5">
+						<path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7" />
+					</svg>
+				</button>
+			{/if}
+
+			{#if showSchedulePopover}
+				<div
+					bind:this={popoverEl}
+					class="absolute bottom-full right-0 z-50 mb-2 w-64 rounded-xl border border-gray-200 bg-white p-3 shadow-lg dark:border-gray-600 dark:bg-gray-800"
+				>
+					<p class="mb-2 text-xs font-medium text-gray-500 dark:text-gray-400">Schedule message</p>
+					<div class="flex flex-col gap-2">
+						<input
+							type="date"
+							bind:value={scheduleDate}
+							min={getTodayStr()}
+							class="rounded-lg border border-gray-200 bg-gray-50 px-2 py-1.5 text-sm dark:border-gray-600 dark:bg-gray-700 dark:text-white"
+						/>
+						<input
+							type="time"
+							bind:value={scheduleTime}
+							class="rounded-lg border border-gray-200 bg-gray-50 px-2 py-1.5 text-sm dark:border-gray-600 dark:bg-gray-700 dark:text-white"
+						/>
+						<button
+							onclick={scheduleSend}
+							class="rounded-lg bg-blue-500 px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-blue-600"
+						>
+							Schedule Send
+						</button>
+					</div>
+				</div>
+			{/if}
+		</div>
 	</div>
 </div>

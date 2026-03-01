@@ -1,40 +1,77 @@
 <script lang="ts">
 	import type { FindMyDevice, FindMyFriend } from '$lib/types/index.js';
 	import { findMyStore } from '$lib/stores/findmy.svelte.js';
+	import { formatRelativeTime, extractCityState, haversineDistance, formatDistance } from '$lib/utils/format.js';
 	import FindMyListItem from './FindMyListItem.svelte';
 
 	type Tab = 'people' | 'devices';
 
+	function getDeviceEmoji(device: FindMyDevice): string {
+		const dc = (device.deviceClass ?? device.modelDisplayName ?? '').toLowerCase();
+		if (device.isConsideredAccessory) return '🎒';
+		if (dc.includes('macbook') || dc.includes('laptop')) return '💻';
+		if (dc.includes('imac') || dc.includes('mac')) return '🖥️';
+		if (dc.includes('ipad')) return '📱';
+		if (dc.includes('watch')) return '⌚';
+		if (dc.includes('airpods') || dc.includes('pod')) return '🎧';
+		if (dc.includes('iphone') || dc.includes('phone')) return '📱';
+		return '📍';
+	}
+
+	function getAvatarUrl(friend: FindMyFriend): string | null {
+		if (!friend.avatarBase64) return null;
+		return `data:image/jpeg;base64,${friend.avatarBase64}`;
+	}
+
+	function buildSubtitle(address: string | null, timestamp: number | null): string {
+		const city = extractCityState(address);
+		const time = timestamp ? formatRelativeTime(timestamp) : null;
+		if (city && time) return `${city} · ${time}`;
+		if (city) return city;
+		if (time) return time;
+		return 'Locating...';
+	}
+
+	function getDistanceFromMe(lat: number | null, lon: number | null): string | null {
+		if (lat == null || lon == null || !myLocation) return null;
+		const miles = haversineDistance(myLocation.latitude, myLocation.longitude, lat, lon);
+		return formatDistance(miles);
+	}
+
 	interface Props {
 		devices: FindMyDevice[];
 		friends: FindMyFriend[];
+		myLocation: {
+			latitude: number;
+			longitude: number;
+			timestamp: number;
+			address: string | null;
+			name: string;
+			photoBase64: string | null;
+		} | null;
 		selectedId: string | null;
 		onSelect: (id: string) => void;
 		starred: Set<string>;
 		onToggleStar: (id: string) => void;
 	}
 
-	let { devices, friends, selectedId, onSelect, starred, onToggleStar }: Props = $props();
+	let { devices, friends, myLocation, selectedId, onSelect, starred, onToggleStar }: Props = $props();
 
 	let activeTab = $state<Tab>('people');
 	let search = $state('');
 	let refreshing = $state(false);
 
-	function friendName(f: FindMyFriend): string {
-		return [f.firstName, f.lastName].filter(Boolean).join(' ') || f.handle;
-	}
-
 	const filteredFriends = $derived.by(() => {
 		const q = search.toLowerCase();
 		const filtered = q
-			? friends.filter((f) => friendName(f).toLowerCase().includes(q))
+			? friends.filter((f) => f.displayName.toLowerCase().includes(q))
 			: friends;
 		return [...filtered].sort((a, b) => {
-			const aStarred = starred.has(a.id);
-			const bStarred = starred.has(b.id);
+			const aStarred = starred.has(a.handle);
+			const bStarred = starred.has(b.handle);
 			if (aStarred && !bStarred) return -1;
 			if (!aStarred && bStarred) return 1;
-			return friendName(a).localeCompare(friendName(b));
+			return a.displayName.localeCompare(b.displayName);
 		});
 	});
 
@@ -112,13 +149,27 @@
 	<!-- List -->
 	<div class="flex-1 overflow-y-auto">
 		{#if activeTab === 'people'}
-			{#each filteredFriends as friend (friend.id)}
+			{#if myLocation}
 				<FindMyListItem
-					id={friend.id}
-					name={friendName(friend)}
-					lastUpdated={friend.locationTimestamp}
-					isStarred={starred.has(friend.id)}
-					isSelected={selectedId === friend.id}
+					id="__me__"
+					name={myLocation.name}
+					subtitle={buildSubtitle(myLocation.address, myLocation.timestamp)}
+					isStarred={false}
+					isSelected={selectedId === '__me__'}
+					avatarUrl={myLocation.photoBase64 ? `data:image/jpeg;base64,${myLocation.photoBase64}` : null}
+					{onSelect}
+					onToggleStar={() => {}}
+				/>
+			{/if}
+			{#each filteredFriends as friend (friend.handle)}
+				<FindMyListItem
+					id={friend.handle}
+					name={friend.displayName}
+					subtitle={buildSubtitle(friend.address, friend.locationTimestamp)}
+					distance={getDistanceFromMe(friend.latitude, friend.longitude)}
+					isStarred={starred.has(friend.handle)}
+					isSelected={selectedId === friend.handle}
+					avatarUrl={getAvatarUrl(friend)}
 					{onSelect}
 					{onToggleStar}
 				/>
@@ -130,9 +181,11 @@
 				<FindMyListItem
 					id={device.id}
 					name={device.name}
-					lastUpdated={device.locationTimestamp}
+					subtitle={buildSubtitle(device.address, device.locationTimestamp)}
+					distance={getDistanceFromMe(device.latitude, device.longitude)}
 					isStarred={starred.has(device.id)}
 					isSelected={selectedId === device.id}
+					emoji={getDeviceEmoji(device)}
 					{onSelect}
 					{onToggleStar}
 				/>

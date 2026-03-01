@@ -14,9 +14,11 @@
 		onEdit: (messageGuid: string, newText: string) => Promise<void>;
 		onUnsend: (messageGuid: string) => Promise<void>;
 		replyToText: string | null;
+		onEditSchedule?: (guid: string) => void;
+		onCancelSchedule?: (guid: string) => void;
 	}
 
-	let { message, attachments, senderName, showSender, reactions, onReact, onReply, onEdit, onUnsend, replyToText }: Props = $props();
+	let { message, attachments, senderName, showSender, reactions, onReact, onReply, onEdit, onUnsend, replyToText, onEditSchedule, onCancelSchedule }: Props = $props();
 
 	const isSent = $derived(message.isFromMe);
 	const isRetracted = $derived(
@@ -418,7 +420,31 @@
 					Copy
 				</button>
 			{/if}
-			{#if isSent && !isRetracted}
+			{#if isScheduled && (onEditSchedule || onCancelSchedule)}
+				<hr class="border-gray-200 dark:border-gray-700" />
+				{#if onEditSchedule}
+				<button
+					onclick={() => { closeContextMenu(); onEditSchedule!(message.guid); }}
+					class="flex w-full items-center gap-2.5 px-3 py-2 text-left text-sm text-gray-700 transition-colors hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-gray-700"
+				>
+					<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+						<path stroke-linecap="round" stroke-linejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+					</svg>
+					Edit Schedule
+				</button>
+				{/if}
+				{#if onCancelSchedule}
+				<button
+					onclick={() => { closeContextMenu(); onCancelSchedule!(message.guid); }}
+					class="flex w-full items-center gap-2.5 px-3 py-2 text-left text-sm text-red-600 transition-colors hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-900/20"
+				>
+					<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+						<path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
+					</svg>
+					Cancel Schedule
+				</button>
+				{/if}
+			{:else if isSent && !isRetracted}
 				<hr class="border-gray-200 dark:border-gray-700" />
 				{#if displayText}
 				<button

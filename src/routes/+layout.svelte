@@ -29,7 +29,6 @@
 
 <div class="flex h-screen flex-col bg-white dark:bg-gray-900">
 	<header class="flex items-center justify-between border-b border-gray-200 px-4 py-2 dark:border-gray-700">
-		<div></div>
 		<div class="flex items-center gap-2">
 			<ModeToggle />
 			{#if syncEngine.syncing}

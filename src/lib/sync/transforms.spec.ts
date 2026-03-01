@@ -2,6 +2,59 @@ import { describe, it, expect } from 'vitest';
 import { chatToDb, messageToDb, handleToDb, attachmentToDb } from './transforms.js';
 import type { Chat, Message, Handle, Attachment } from '$lib/types/index.js';
 
+function testMessage(overrides: Partial<Message> = {}): Message {
+	return {
+		originalROWID: 0,
+		guid: '',
+		text: null,
+		attributedBody: [],
+		handle: null,
+		handleId: 0,
+		otherHandle: 0,
+		attachments: [],
+		subject: null,
+		error: 0,
+		dateCreated: 0,
+		dateRead: null,
+		dateDelivered: null,
+		isDelivered: false,
+		isFromMe: false,
+		hasDdResults: false,
+		isArchived: false,
+		itemType: 0,
+		groupTitle: null,
+		groupActionType: 0,
+		balloonBundleId: null,
+		associatedMessageGuid: null,
+		associatedMessageType: 0,
+		associatedMessageEmoji: null,
+		expressiveSendStyleId: null,
+		threadOriginatorGuid: null,
+		threadOriginatorPart: null,
+		hasPayloadData: false,
+		isDelayed: false,
+		isAutoReply: false,
+		isSystemMessage: false,
+		isServiceMessage: false,
+		isForward: false,
+		isCorrupt: false,
+		datePlayed: null,
+		isSpam: false,
+		isExpired: false,
+		isAudioMessage: false,
+		replyToGuid: null,
+		shareStatus: 0,
+		shareDirection: 0,
+		wasDeliveredQuietly: false,
+		didNotifyRecipient: false,
+		chats: [],
+		dateEdited: null,
+		dateRetracted: null,
+		partCount: null,
+		...overrides
+	};
+}
+
 describe('transforms', () => {
 	it('transforms Chat to DbChat', () => {
 		const chat = {
@@ -54,32 +107,17 @@ describe('transforms', () => {
 	});
 
 	it('transforms Message to DbMessage', () => {
-		const msg = {
+		const msg = testMessage({
 			guid: 'msg-1',
 			text: 'Hello',
 			handleId: 1,
 			handle: { address: '+1234567890', service: 'iMessage', country: 'us', originalROWID: 1, uncanonicalizedId: null },
 			isFromMe: false,
 			dateCreated: 1700000000000,
-			dateRead: null,
 			dateDelivered: 1700000000500,
-			attachments: [],
 			chats: [{ guid: 'iMessage;-;+1234567890' } as Chat],
-			associatedMessageGuid: null,
-			associatedMessageType: 0,
-			threadOriginatorGuid: null,
-			error: 0,
-			isDelivered: true,
-			dateEdited: null,
-			dateRetracted: null,
-			expressiveSendStyleId: null,
-			subject: null,
-			associatedMessageEmoji: null,
-			groupTitle: null,
-			groupActionType: 0,
-			isSystemMessage: false,
-			itemType: 0
-		} as Message;
+			isDelivered: true
+		});
 
 		const db = messageToDb(msg);
 		expect(db.guid).toBe('msg-1');
@@ -89,17 +127,13 @@ describe('transforms', () => {
 	});
 
 	it('handles null handle in message', () => {
-		const msg = {
+		const msg = testMessage({
 			guid: 'msg-2',
-			handle: null,
 			chats: [{ guid: 'chat-1' } as Chat],
 			attachments: [{ guid: 'att-1' } as Attachment],
-			text: null, handleId: 0, isFromMe: true, dateCreated: 0, dateRead: null,
-			dateDelivered: null, dateEdited: null, dateRetracted: null, subject: null,
-			associatedMessageGuid: null, associatedMessageType: 0, associatedMessageEmoji: null,
-			threadOriginatorGuid: null, error: 0, expressiveSendStyleId: null, isDelivered: true,
-			groupTitle: null, groupActionType: 0, isSystemMessage: false, itemType: 0
-		} as Message;
+			isFromMe: true,
+			isDelivered: true
+		});
 
 		const db = messageToDb(msg);
 		expect(db.handleAddress).toBeNull();
@@ -107,100 +141,70 @@ describe('transforms', () => {
 	});
 
 	it('uses chatGuidOverride when provided', () => {
-		const msg = {
+		const msg = testMessage({
 			guid: 'msg-override',
-			handle: null,
+			text: 'Override test',
 			chats: [{ guid: 'iMessage;-;+1234567890' } as Chat],
-			attachments: [],
-			text: 'Override test', handleId: 0, isFromMe: true, dateCreated: 0, dateRead: null,
-			dateDelivered: null, dateEdited: null, dateRetracted: null, subject: null,
-			associatedMessageGuid: null, associatedMessageType: 0, associatedMessageEmoji: null,
-			threadOriginatorGuid: null, error: 0, expressiveSendStyleId: null, isDelivered: true,
-			groupTitle: null, groupActionType: 0, isSystemMessage: false, itemType: 0
-		} as Message;
+			isFromMe: true,
+			isDelivered: true
+		});
 
 		const db = messageToDb(msg, 'iMessage;-;+9999999999');
 		expect(db.chatGuid).toBe('iMessage;-;+9999999999');
 	});
 
 	it('uses chatGuidOverride when chats is empty', () => {
-		const msg = {
+		const msg = testMessage({
 			guid: 'msg-override-empty',
-			handle: null,
+			text: 'No chats',
 			chats: undefined as unknown as Chat[],
-			attachments: [],
-			text: 'No chats', handleId: 0, isFromMe: true, dateCreated: 0, dateRead: null,
-			dateDelivered: null, dateEdited: null, dateRetracted: null, subject: null,
-			associatedMessageGuid: null, associatedMessageType: 0, associatedMessageEmoji: null,
-			threadOriginatorGuid: null, error: 0, expressiveSendStyleId: null, isDelivered: true,
-			groupTitle: null, groupActionType: 0, isSystemMessage: false, itemType: 0
-		} as Message;
+			isFromMe: true,
+			isDelivered: true
+		});
 
 		const db = messageToDb(msg, 'iMessage;-;+5555555555');
 		expect(db.chatGuid).toBe('iMessage;-;+5555555555');
 	});
 
 	it('handles message with no chats', () => {
-		const msg = {
+		const msg = testMessage({
 			guid: 'msg-no-chats',
-			handle: null,
+			text: 'Orphaned',
 			chats: undefined as unknown as Chat[],
-			attachments: [],
-			text: 'Orphaned', handleId: 0, isFromMe: false, dateCreated: 100, dateRead: null,
-			dateDelivered: null, dateEdited: null, dateRetracted: null, subject: null,
-			associatedMessageGuid: null, associatedMessageType: 0, associatedMessageEmoji: null,
-			threadOriginatorGuid: null, error: 0, expressiveSendStyleId: null, isDelivered: false,
-			groupTitle: null, groupActionType: 0, isSystemMessage: false, itemType: 0
-		} as Message;
+			dateCreated: 100
+		});
 
 		const db = messageToDb(msg);
 		expect(db.chatGuid).toBe('');
 	});
 
 	it('handles message with no attachments', () => {
-		const msg = {
+		const msg = testMessage({
 			guid: 'msg-no-att',
-			handle: null,
+			text: 'No attachments',
 			chats: [{ guid: 'chat-1' } as Chat],
 			attachments: undefined as unknown as Attachment[],
-			text: 'No attachments', handleId: 0, isFromMe: true, dateCreated: 200, dateRead: null,
-			dateDelivered: null, dateEdited: null, dateRetracted: null, subject: null,
-			associatedMessageGuid: null, associatedMessageType: 0, associatedMessageEmoji: null,
-			threadOriginatorGuid: null, error: 0, expressiveSendStyleId: null, isDelivered: true,
-			groupTitle: null, groupActionType: 0, isSystemMessage: false, itemType: 0
-		} as Message;
+			isFromMe: true,
+			dateCreated: 200,
+			isDelivered: true
+		});
 
 		const db = messageToDb(msg);
 		expect(db.attachmentGuids).toEqual([]);
 	});
 
 	it('transforms reaction message', () => {
-		const msg = {
+		const msg = testMessage({
 			guid: 'msg-reaction',
 			handle: { address: '+1111111111', service: 'iMessage', country: 'us', originalROWID: 3, uncanonicalizedId: null },
 			chats: [{ guid: 'iMessage;-;+1234567890' } as Chat],
-			attachments: [],
 			text: '\ufffc Loved "Hello"',
 			handleId: 3,
-			isFromMe: false,
 			dateCreated: 1700000001000,
-			dateRead: null,
-			dateDelivered: null,
-			dateEdited: null,
-			dateRetracted: null,
-			subject: null,
 			associatedMessageGuid: 'p:0/msg-1',
 			associatedMessageType: 2000,
-			associatedMessageEmoji: null,
-			threadOriginatorGuid: null,
-			error: 0,
-			expressiveSendStyleId: null,
-			isDelivered: true,
-			groupTitle: null,
-			groupActionType: 0,
-			isSystemMessage: false,
-			itemType: 0
-		} as Message;
+			isDelivered: true
+		});
 
 		const db = messageToDb(msg);
 		expect(db.associatedMessageGuid).toBe('p:0/msg-1');

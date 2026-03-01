@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { formatRelativeTime } from '$lib/utils/format.js';
+	import { formatRelativeTime, haversineDistance, formatDistance } from '$lib/utils/format.js';
 
 	interface Props {
 		name: string;
@@ -7,11 +7,18 @@
 		latitude: number | null;
 		longitude: number | null;
 		lastUpdated: number | null;
-		batteryLevel: number | null;
+		myLatitude: number | null;
+		myLongitude: number | null;
 		onClose: () => void;
 	}
 
-	let { name, address, latitude, longitude, lastUpdated, batteryLevel, onClose }: Props = $props();
+	let { name, address, latitude, longitude, lastUpdated, myLatitude, myLongitude, onClose }: Props = $props();
+
+	const distance = $derived.by(() => {
+		if (latitude == null || longitude == null || myLatitude == null || myLongitude == null) return null;
+		const miles = haversineDistance(myLatitude, myLongitude, latitude, longitude);
+		return formatDistance(miles);
+	});
 
 	let copiedAddress = $state(false);
 	let copiedCoords = $state(false);
@@ -30,12 +37,6 @@
 			copiedCoords = true;
 			setTimeout(() => (copiedCoords = false), 2000);
 		}
-	}
-
-	function batteryColor(level: number): string {
-		if (level > 0.5) return 'text-green-500';
-		if (level > 0.2) return 'text-yellow-500';
-		return 'text-red-500';
 	}
 </script>
 
@@ -58,9 +59,16 @@
 	<div class="flex-1 space-y-4 overflow-y-auto p-4">
 		<!-- Address -->
 		{#if address}
+			{@const parts = address.split(',').map((p: string) => p.trim())}
 			<div>
 				<h3 class="mb-1 text-xs font-medium uppercase tracking-wide text-gray-400">Address</h3>
-				<p class="text-sm dark:text-gray-200">{address}</p>
+				{#if parts.length >= 3 && /\d/.test(parts[0])}
+					<!-- Full address: "123 Main St, City, ST 94102" → two lines -->
+					<p class="text-sm dark:text-gray-200">{parts[0]}</p>
+					<p class="text-sm dark:text-gray-200">{parts.slice(1).join(', ')}</p>
+				{:else}
+					<p class="text-sm dark:text-gray-200">{address}</p>
+				{/if}
 				<button
 					onclick={copyAddress}
 					class="mt-1 text-xs text-blue-500 transition-colors hover:text-blue-600"
@@ -84,6 +92,14 @@
 			</div>
 		{/if}
 
+		<!-- Distance from Me -->
+		{#if distance}
+			<div>
+				<h3 class="mb-1 text-xs font-medium uppercase tracking-wide text-gray-400">Distance</h3>
+				<p class="text-sm dark:text-gray-200">{distance} away</p>
+			</div>
+		{/if}
+
 		<!-- Last Updated -->
 		<div>
 			<h3 class="mb-1 text-xs font-medium uppercase tracking-wide text-gray-400">Last Updated</h3>
@@ -96,20 +112,5 @@
 			</p>
 		</div>
 
-		<!-- Battery -->
-		{#if batteryLevel != null}
-			<div>
-				<h3 class="mb-1 text-xs font-medium uppercase tracking-wide text-gray-400">Battery</h3>
-				<div class="flex items-center gap-2">
-					<div class="h-2 flex-1 rounded-full bg-gray-200 dark:bg-gray-700">
-						<div
-							class="h-2 rounded-full {batteryColor(batteryLevel)} bg-current"
-							style="width: {Math.round(batteryLevel * 100)}%"
-						></div>
-					</div>
-					<span class="text-sm font-medium {batteryColor(batteryLevel)}">{Math.round(batteryLevel * 100)}%</span>
-				</div>
-			</div>
-		{/if}
 	</div>
 </div>

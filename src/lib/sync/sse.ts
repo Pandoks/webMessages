@@ -24,7 +24,8 @@ export class SSEClient {
 			'group-name-change',
 			'participant-added',
 			'participant-removed',
-			'participant-left'
+			'participant-left',
+			'new-findmy-location'
 		];
 
 		for (const type of eventTypes) {
