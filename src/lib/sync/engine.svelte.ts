@@ -17,6 +17,7 @@ export class SyncEngine {
 	private chatMessageSyncPromises = new Map<string, Promise<void>>();
 	private periodicSyncInterval: ReturnType<typeof setInterval> | null = null;
 	private periodicSyncRunning = false;
+	private contactsFullyResolved = false;
 
 	async start() {
 		this.sse.onEvent((type, data) => this.handleEvent(type, data));
@@ -459,6 +460,10 @@ export class SyncEngine {
 			}
 
 			// Step 2: Insert new handle entries for AddressBook contacts not already in Dexie
+			// Only run once per session — subsequent syncs skip this expensive step
+			if (this.contactsFullyResolved) return;
+			this.contactsFullyResolved = true;
+
 			const existingAddresses = new Set(
 				((await db.handles.toCollection().primaryKeys()) as string[]).map(
 					(addr) => addr.replace(/[\s\-()]/g, '').toLowerCase()

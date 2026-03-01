@@ -130,7 +130,6 @@
 
 		// Deduplicate by displayName: group handles sharing the same displayName,
 		// pick the "primary" address
-		const seenNames = new Set<string>();
 		const results: SearchResult[] = [];
 
 		// Group by displayName
@@ -151,10 +150,8 @@
 
 		// For each named group, pick a primary address
 		for (const [name, handles] of grouped) {
-			if (seenNames.has(name)) continue;
 			// Skip if this name is already selected
 			if (selectedNames.has(name)) continue;
-			seenNames.add(name);
 
 			const primary = pickPrimaryHandle(handles);
 			results.push({
