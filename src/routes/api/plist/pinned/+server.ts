@@ -20,3 +20,44 @@ export const GET: RequestHandler = async () => {
 		return json({ status: 200, data: [] });
 	}
 };
+
+export const POST: RequestHandler = async ({ request }) => {
+	let body: unknown;
+	try {
+		body = await request.json();
+	} catch {
+		return json({ status: 400, error: 'Invalid JSON body' }, { status: 400 });
+	}
+
+	if (
+		typeof body !== 'object' ||
+		body === null ||
+		typeof (body as Record<string, unknown>).chatIdentifier !== 'string' ||
+		typeof (body as Record<string, unknown>).pinned !== 'boolean'
+	) {
+		return json(
+			{ status: 400, error: 'Body must contain { chatIdentifier: string, pinned: boolean }' },
+			{ status: 400 }
+		);
+	}
+
+	const { chatIdentifier, pinned } = body as { chatIdentifier: string; pinned: boolean };
+
+	const binaryPath = join(process.cwd(), 'src', 'lib', 'server', 'pin-chat');
+
+	if (!existsSync(binaryPath)) {
+		return json(
+			{ status: 500, error: 'pin-chat binary not found. Compile it first.' },
+			{ status: 500 }
+		);
+	}
+
+	try {
+		execFileSync(binaryPath, [chatIdentifier, pinned ? 'pin' : 'unpin'], { timeout: 5000 });
+		return json({ status: 200, data: { ok: true } });
+	} catch (err) {
+		const message =
+			err instanceof Error ? err.message : 'pin-chat binary failed with unknown error';
+		return json({ status: 500, error: message }, { status: 500 });
+	}
+};
