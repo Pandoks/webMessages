@@ -2,15 +2,29 @@
 	import { liveQuery } from 'dexie';
 	import { db } from '$lib/db/index.js';
 	import { page } from '$app/state';
+	import { goto } from '$app/navigation';
 	import ChatListItem from './ChatListItem.svelte';
+	import ChatContextMenu from './ChatContextMenu.svelte';
 	import NewChatModal from './NewChatModal.svelte';
-	import { getChatDisplayName } from '$lib/utils/format.js';
+	import { getChatDisplayName, formatPhoneNumber } from '$lib/utils/format.js';
 	import type { DbChat, DbHandle } from '$lib/db/types.js';
 
 	let search = $state('');
 	let newChatOpen = $state(false);
 	let allChats = $state<DbChat[]>([]);
 	let allHandles = $state<DbHandle[]>([]);
+
+	let contextMenu = $state<{
+		x: number;
+		y: number;
+		chat: DbChat;
+	} | null>(null);
+
+	let confirmDialog = $state<{
+		title: string;
+		message: string;
+		onConfirm: () => void;
+	} | null>(null);
 
 	// Subscribe to liveQuery via $effect
 	$effect(() => {
@@ -132,6 +146,82 @@
 		return siblings?.includes(activeChatGuid) ?? false;
 	}
 
+	async function handlePin(chat: DbChat) {
+		const newPinned = !chat.isPinned;
+		// Optimistic update
+		await db.chats.update(chat.guid, { isPinned: newPinned });
+		try {
+			await fetch('/api/plist/pinned', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ chatIdentifier: chat.chatIdentifier, pinned: newPinned })
+			});
+		} catch {
+			// Revert on failure
+			await db.chats.update(chat.guid, { isPinned: !newPinned });
+		}
+	}
+
+	async function handleToggleRead(chat: DbChat) {
+		const allGuids = siblingGuidsMap.get(chat.guid) ?? [chat.guid];
+		if (chat.unreadCount > 0) {
+			// Mark as read
+			for (const guid of allGuids) {
+				await db.chats.update(guid, { unreadCount: 0 });
+			}
+			for (const guid of allGuids) {
+				fetch(`/api/proxy/chat/${encodeURIComponent(guid)}/read`, { method: 'POST' }).catch(() => {});
+			}
+		} else {
+			// Mark as unread
+			for (const guid of allGuids) {
+				await db.chats.update(guid, { unreadCount: 1 });
+			}
+			for (const guid of allGuids) {
+				fetch(`/api/proxy/chat/${encodeURIComponent(guid)}/unread`, { method: 'POST' }).catch(() => {});
+			}
+		}
+	}
+
+	function handleDelete(chat: DbChat) {
+		confirmDialog = {
+			title: 'Delete Conversation',
+			message: 'This conversation will be removed from your Messages app too. This cannot be undone.',
+			onConfirm: async () => {
+				confirmDialog = null;
+				const allGuids = siblingGuidsMap.get(chat.guid) ?? [chat.guid];
+
+				// Navigate away if active
+				if (allGuids.some((g) => isChatActive(g))) {
+					goto('/messages');
+				}
+
+				// Delete from IndexedDB and API
+				for (const guid of allGuids) {
+					await db.messages.where('chatGuid').equals(guid).delete();
+					await db.chats.delete(guid);
+					fetch(`/api/proxy/chat/${encodeURIComponent(guid)}`, { method: 'DELETE' }).catch(() => {});
+				}
+			}
+		};
+	}
+
+	function handleLeave(chat: DbChat) {
+		confirmDialog = {
+			title: 'Leave Conversation',
+			message: "You won't receive new messages from this group.",
+			onConfirm: async () => {
+				confirmDialog = null;
+				if (isChatActive(chat.guid)) {
+					goto('/messages');
+				}
+				await db.messages.where('chatGuid').equals(chat.guid).delete();
+				await db.chats.delete(chat.guid);
+				fetch(`/api/proxy/chat/${encodeURIComponent(chat.guid)}/leave`, { method: 'POST' }).catch(() => {});
+			}
+		};
+	}
+
 </script>
 
 <div class="flex h-full flex-col">
@@ -159,7 +249,7 @@
 		<div class="shrink-0 border-b border-gray-200 dark:border-gray-700">
 			{#each pinnedChats as chat (chat.guid)}
 				{@const chatParticipants = chat.participants.map((addr) => {
-					const name = handleMap.get(addr) || addr;
+					const name = handleMap.get(addr) || formatPhoneNumber(addr);
 					const raw = avatarMap.get(addr);
 					const mime = raw?.startsWith('iVBOR') ? 'image/png' : 'image/jpeg';
 					return { name, avatar: raw ? `data:${mime};base64,${raw}` : null };
@@ -173,6 +263,7 @@
 					isActive={isChatActive(chat.guid)}
 					isPinned={chat.isPinned}
 					participants={chatParticipants}
+					oncontextmenu={(e) => { contextMenu = { x: e.clientX, y: e.clientY, chat }; }}
 				/>
 			{/each}
 		</div>
@@ -182,7 +273,7 @@
 	<div class="flex-1 overflow-y-auto">
 		{#each regularChats as chat (chat.guid)}
 			{@const chatParticipants = chat.participants.map((addr) => {
-				const name = handleMap.get(addr) || addr;
+				const name = handleMap.get(addr) || formatPhoneNumber(addr);
 				const raw = avatarMap.get(addr);
 				const mime = raw?.startsWith('iVBOR') ? 'image/png' : 'image/jpeg';
 				return { name, avatar: raw ? `data:${mime};base64,${raw}` : null };
@@ -196,6 +287,7 @@
 				isActive={isChatActive(chat.guid)}
 				isPinned={false}
 				participants={chatParticipants}
+				oncontextmenu={(e) => { contextMenu = { x: e.clientX, y: e.clientY, chat }; }}
 			/>
 		{:else}
 			<p class="p-4 text-center text-sm text-gray-400">No conversations</p>
@@ -204,3 +296,43 @@
 </div>
 
 <NewChatModal open={newChatOpen} onClose={() => (newChatOpen = false)} />
+
+{#if contextMenu}
+	<ChatContextMenu
+		x={contextMenu.x}
+		y={contextMenu.y}
+		isPinned={contextMenu.chat.isPinned}
+		isGroup={contextMenu.chat.style === 43}
+		hasUnread={contextMenu.chat.unreadCount > 0}
+		onPin={() => handlePin(contextMenu!.chat)}
+		onDelete={() => handleDelete(contextMenu!.chat)}
+		onToggleRead={() => handleToggleRead(contextMenu!.chat)}
+		onLeave={() => handleLeave(contextMenu!.chat)}
+		onClose={() => { contextMenu = null; }}
+	/>
+{/if}
+
+{#if confirmDialog}
+	<!-- svelte-ignore a11y_no_static_element_interactions -->
+	<div class="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onclick={() => { confirmDialog = null; }}>
+		<!-- svelte-ignore a11y_no_static_element_interactions -->
+		<div class="mx-4 w-full max-w-sm rounded-2xl bg-white p-6 shadow-xl dark:bg-gray-800" onclick={(e) => e.stopPropagation()}>
+			<h3 class="text-lg font-semibold dark:text-white">{confirmDialog.title}</h3>
+			<p class="mt-2 text-sm text-gray-500 dark:text-gray-400">{confirmDialog.message}</p>
+			<div class="mt-4 flex justify-end gap-2">
+				<button
+					onclick={() => { confirmDialog = null; }}
+					class="rounded-lg px-4 py-2 text-sm text-gray-700 transition-colors hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700"
+				>
+					Cancel
+				</button>
+				<button
+					onclick={confirmDialog.onConfirm}
+					class="rounded-lg bg-red-500 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-red-600"
+				>
+					{confirmDialog.title.startsWith('Leave') ? 'Leave' : 'Delete'}
+				</button>
+			</div>
+		</div>
+	</div>
+{/if}
