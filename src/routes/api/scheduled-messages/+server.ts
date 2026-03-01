@@ -3,32 +3,28 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { resolve } from 'node:path';
 import type { RequestHandler } from './$types.js';
+import type { ScheduledMessage } from '$lib/types/index.js';
 
 const execFileAsync = promisify(execFile);
 const BRIDGE = resolve('src/lib/server/imcore-bridge');
 
-async function runBridge(
-	args: string[],
-	timeout = 15_000
-): Promise<{ ok: boolean; data?: unknown; error?: string }> {
-	try {
-		const { stdout } = await execFileAsync(BRIDGE, args, { timeout });
-		return JSON.parse(stdout);
-	} catch (err: unknown) {
-		const msg = err instanceof Error ? err.message : String(err);
-		return { ok: false, error: msg };
-	}
+async function runBridge(args: string[], timeout = 15_000): Promise<unknown> {
+	const { stdout } = await execFileAsync(BRIDGE, args, { timeout });
+	const result = JSON.parse(stdout);
+	if (!result.ok) throw new Error(result.error ?? 'Bridge command failed');
+	return result.data;
 }
 
 export const GET: RequestHandler = async ({ url }) => {
-	const chatGuid = url.searchParams.get('chatGuid');
-	const args = chatGuid ? ['list', chatGuid] : ['list-all'];
-	const result = await runBridge(args);
+	const chatGuid = url.searchParams.get('chatGuid') ?? undefined;
 
-	if (!result.ok) {
+	try {
+		const args = chatGuid ? ['list', chatGuid] : ['list-all'];
+		const data = (await runBridge(args)) as ScheduledMessage[];
+		return json({ status: 200, data });
+	} catch {
 		return json({ status: 200, data: [] });
 	}
-	return json({ status: 200, data: result.data });
 };
 
 export const POST: RequestHandler = async ({ request }) => {
@@ -48,15 +44,16 @@ export const POST: RequestHandler = async ({ request }) => {
 		);
 	}
 
-	const result = await runBridge([
-		'schedule',
-		chatGuid,
-		message.trim(),
-		String(scheduledAt)
-	]);
-
-	if (!result.ok) {
-		return json({ status: 500, message: result.error }, { status: 500 });
+	try {
+		const data = await runBridge([
+			'schedule',
+			chatGuid,
+			message.trim(),
+			String(scheduledAt)
+		]);
+		return json({ status: 201, data }, { status: 201 });
+	} catch (err) {
+		const msg = err instanceof Error ? err.message : 'Failed to schedule message';
+		return json({ status: 500, message: msg }, { status: 500 });
 	}
-	return json({ status: 201, data: result.data }, { status: 201 });
 };

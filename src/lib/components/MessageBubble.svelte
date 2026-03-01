@@ -14,11 +14,11 @@
 		onEdit: (messageGuid: string, newText: string) => Promise<void>;
 		onUnsend: (messageGuid: string) => Promise<void>;
 		replyToText: string | null;
-		onEditSchedule?: (guid: string) => void;
+		onSaveScheduleEdit?: (guid: string, message?: string, scheduledAt?: number) => Promise<void>;
 		onCancelSchedule?: (guid: string) => void;
 	}
 
-	let { message, attachments, senderName, showSender, reactions, onReact, onReply, onEdit, onUnsend, replyToText, onEditSchedule, onCancelSchedule }: Props = $props();
+	let { message, attachments, senderName, showSender, reactions, onReact, onReply, onEdit, onUnsend, replyToText, onSaveScheduleEdit, onCancelSchedule }: Props = $props();
 
 	const isSent = $derived(message.isFromMe);
 	const isRetracted = $derived(
@@ -33,6 +33,10 @@
 	let contextMenuY = $state(0);
 	let editing = $state(false);
 	let editText = $state('');
+	let editingSchedule = $state(false);
+	let schedEditText = $state('');
+	let schedEditDate = $state('');
+	let schedEditTime = $state('');
 
 	// Close context menu on scroll
 	$effect(() => {
@@ -217,6 +221,42 @@
 		}
 	}
 
+	function startScheduleEdit() {
+		schedEditText = message.text ?? '';
+		const d = new Date(message.dateCreated);
+		schedEditDate = d.toISOString().slice(0, 10);
+		schedEditTime = d.toTimeString().slice(0, 5);
+		editingSchedule = true;
+		closeContextMenu();
+	}
+
+	async function saveScheduleEdit() {
+		if (!onSaveScheduleEdit) return;
+		const newText = schedEditText.trim();
+		const newMs = new Date(`${schedEditDate}T${schedEditTime}`).getTime();
+		const textChanged = newText && newText !== (message.text ?? '');
+		const timeChanged = !isNaN(newMs) && newMs !== message.dateCreated;
+		await onSaveScheduleEdit(
+			message.guid,
+			textChanged ? newText : undefined,
+			timeChanged ? newMs : undefined
+		);
+		editingSchedule = false;
+	}
+
+	function cancelScheduleEdit() {
+		editingSchedule = false;
+	}
+
+	function handleScheduleEditKeydown(e: KeyboardEvent) {
+		if (e.key === 'Enter' && !e.shiftKey) {
+			e.preventDefault();
+			saveScheduleEdit();
+		} else if (e.key === 'Escape') {
+			cancelScheduleEdit();
+		}
+	}
+
 	function handleUnsend() {
 		closeContextMenu();
 		onUnsend(message.guid);
@@ -268,7 +308,43 @@
 				</div>
 			{/if}
 
-			{#if editing}
+			{#if editingSchedule}
+				<div class="flex flex-col gap-1.5">
+					<textarea
+						bind:value={schedEditText}
+						onkeydown={handleScheduleEditKeydown}
+						class="w-full resize-none rounded-lg bg-blue-100 px-2 py-1 text-sm text-blue-800 outline-none dark:bg-blue-900/30 dark:text-blue-200"
+						rows="2"
+						placeholder="Message text"
+					></textarea>
+					<div class="flex gap-1.5">
+						<input
+							type="date"
+							bind:value={schedEditDate}
+							class="flex-1 rounded-lg bg-blue-100 px-2 py-1 text-xs text-blue-800 outline-none dark:bg-blue-900/30 dark:text-blue-200"
+						/>
+						<input
+							type="time"
+							bind:value={schedEditTime}
+							class="rounded-lg bg-blue-100 px-2 py-1 text-xs text-blue-800 outline-none dark:bg-blue-900/30 dark:text-blue-200"
+						/>
+					</div>
+					<div class="flex justify-end gap-1">
+						<button
+							onclick={cancelScheduleEdit}
+							class="rounded px-2 py-0.5 text-xs text-blue-600 opacity-70 transition-opacity hover:opacity-100 dark:text-blue-400"
+						>
+							Cancel
+						</button>
+						<button
+							onclick={saveScheduleEdit}
+							class="rounded bg-blue-500 px-2 py-0.5 text-xs font-medium text-white transition-colors hover:bg-blue-600"
+						>
+							Save
+						</button>
+					</div>
+				</div>
+			{:else if editing}
 				<div class="flex flex-col gap-1.5">
 					<textarea
 						bind:value={editText}
@@ -397,9 +473,12 @@
 		class="fixed z-[51] flex flex-col gap-1"
 		style="left: {contextMenuX}px; top: {contextMenuY}px;"
 	>
+		{#if !isScheduled}
 		<ReactionPicker onReact={handleReact} />
+		{/if}
 
 		<div class="min-w-[160px] overflow-hidden rounded-xl bg-white shadow-lg ring-1 ring-black/10 dark:bg-gray-800 dark:ring-white/10">
+			{#if !isScheduled}
 			<button
 				onclick={handleReply}
 				class="flex w-full items-center gap-2.5 px-3 py-2 text-left text-sm text-gray-700 transition-colors hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-gray-700"
@@ -409,6 +488,7 @@
 				</svg>
 				Reply
 			</button>
+			{/if}
 			{#if displayText}
 				<button
 					onclick={handleCopy}
@@ -420,17 +500,17 @@
 					Copy
 				</button>
 			{/if}
-			{#if isScheduled && (onEditSchedule || onCancelSchedule)}
+			{#if isScheduled && (onSaveScheduleEdit || onCancelSchedule)}
 				<hr class="border-gray-200 dark:border-gray-700" />
-				{#if onEditSchedule}
+				{#if onSaveScheduleEdit}
 				<button
-					onclick={() => { closeContextMenu(); onEditSchedule!(message.guid); }}
+					onclick={startScheduleEdit}
 					class="flex w-full items-center gap-2.5 px-3 py-2 text-left text-sm text-gray-700 transition-colors hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-gray-700"
 				>
 					<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-						<path stroke-linecap="round" stroke-linejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+						<path stroke-linecap="round" stroke-linejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
 					</svg>
-					Edit Schedule
+					Edit
 				</button>
 				{/if}
 				{#if onCancelSchedule}

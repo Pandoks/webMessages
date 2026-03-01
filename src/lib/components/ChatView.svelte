@@ -29,7 +29,7 @@
 	let wasNearBottom = $state(true);
 	let replyTo = $state<{ guid: string; text: string | null; senderName: string } | null>(null);
 	let showLocationPanel = $state(false);
-	let showScheduled = $state(false);
+	let showScheduled = $state(true);
 
 	// Find sibling chat GUIDs (same contact, different address e.g. phone + email)
 	let allChatGuids = $state<string[]>([chatGuid]);
@@ -81,7 +81,7 @@
 			db.messages
 				.where('chatGuid')
 				.anyOf(guids)
-				.filter((m) => m.associatedMessageType === 0)
+				.filter((m) => m.associatedMessageType === 0 && m.dateCreated <= Date.now())
 				.sortBy('dateCreated')
 		).subscribe((msgs) => {
 			messages = msgs;
@@ -693,7 +693,7 @@
 							onEdit={handleEdit}
 							onUnsend={handleUnsend}
 							replyToText={null}
-							onEditSchedule={(guid) => handleEditScheduled(guid)}
+							onSaveScheduleEdit={(guid, message, scheduledAt) => handleEditScheduled(guid, message, scheduledAt)}
 							onCancelSchedule={(guid) => handleDeleteScheduled(guid)}
 						/>
 					{/each}

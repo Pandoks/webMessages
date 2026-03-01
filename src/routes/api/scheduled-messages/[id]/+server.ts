@@ -7,17 +7,11 @@ import type { RequestHandler } from './$types.js';
 const execFileAsync = promisify(execFile);
 const BRIDGE = resolve('src/lib/server/imcore-bridge');
 
-async function runBridge(
-	args: string[],
-	timeout = 15_000
-): Promise<{ ok: boolean; data?: unknown; error?: string }> {
-	try {
-		const { stdout } = await execFileAsync(BRIDGE, args, { timeout });
-		return JSON.parse(stdout);
-	} catch (err: unknown) {
-		const msg = err instanceof Error ? err.message : String(err);
-		return { ok: false, error: msg };
-	}
+async function runBridge(args: string[], timeout = 15_000): Promise<unknown> {
+	const { stdout } = await execFileAsync(BRIDGE, args, { timeout });
+	const result = JSON.parse(stdout);
+	if (!result.ok) throw new Error(result.error ?? 'Bridge command failed');
+	return result.data;
 }
 
 export const PUT: RequestHandler = async ({ params, request }) => {
@@ -28,29 +22,27 @@ export const PUT: RequestHandler = async ({ params, request }) => {
 		return json({ status: 400, message: 'chatGuid is required' }, { status: 400 });
 	}
 
-	// Edit text if provided
-	if (message !== undefined) {
-		if (typeof message !== 'string' || !message.trim()) {
-			return json({ status: 400, message: 'message must be non-empty' }, { status: 400 });
+	try {
+		if (message !== undefined) {
+			if (typeof message !== 'string' || !message.trim()) {
+				return json({ status: 400, message: 'message must be non-empty' }, { status: 400 });
+			}
+			await runBridge(['edit-text', params.id, chatGuid, message.trim()]);
 		}
-		const result = await runBridge(['edit-text', params.id, chatGuid, message.trim()]);
-		if (!result.ok) {
-			return json({ status: 500, message: result.error }, { status: 500 });
+		if (scheduledAt !== undefined) {
+			if (typeof scheduledAt !== 'number' || scheduledAt <= Date.now()) {
+				return json(
+					{ status: 400, message: 'scheduledAt must be a future timestamp' },
+					{ status: 400 }
+				);
+			}
+			await runBridge(['edit-time', params.id, chatGuid, String(scheduledAt)]);
 		}
+		return json({ status: 200 });
+	} catch (err) {
+		const msg = err instanceof Error ? err.message : 'Failed to edit scheduled message';
+		return json({ status: 500, message: msg }, { status: 500 });
 	}
-
-	// Edit time if provided
-	if (scheduledAt !== undefined) {
-		if (typeof scheduledAt !== 'number' || scheduledAt <= Date.now()) {
-			return json({ status: 400, message: 'scheduledAt must be a future timestamp' }, { status: 400 });
-		}
-		const result = await runBridge(['edit-time', params.id, chatGuid, String(scheduledAt)]);
-		if (!result.ok) {
-			return json({ status: 500, message: result.error }, { status: 500 });
-		}
-	}
-
-	return json({ status: 200, data: { guid: params.id } });
 };
 
 export const DELETE: RequestHandler = async ({ params, url }) => {
@@ -60,10 +52,11 @@ export const DELETE: RequestHandler = async ({ params, url }) => {
 		return json({ status: 400, message: 'chatGuid query param is required' }, { status: 400 });
 	}
 
-	const result = await runBridge(['cancel', params.id, chatGuid]);
-
-	if (!result.ok) {
-		return json({ status: 500, message: result.error }, { status: 500 });
+	try {
+		await runBridge(['cancel', params.id, chatGuid]);
+		return json({ status: 200, data: null });
+	} catch (err) {
+		const msg = err instanceof Error ? err.message : 'Failed to cancel scheduled message';
+		return json({ status: 500, message: msg }, { status: 500 });
 	}
-	return json({ status: 200, data: null });
 };
