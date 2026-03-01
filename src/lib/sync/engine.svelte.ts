@@ -15,8 +15,6 @@ export class SyncEngine {
 	private sse = new SSEClient();
 	private syncedChatGuids = new Set<string>();
 	private chatMessageSyncPromises = new Map<string, Promise<void>>();
-	private periodicSyncInterval: ReturnType<typeof setInterval> | null = null;
-	private periodicSyncRunning = false;
 	private contactsFullyResolved = false;
 
 	async start() {
@@ -31,14 +29,9 @@ export class SyncEngine {
 			await this.initialSync();
 		}
 
-		this.periodicSyncInterval = setInterval(() => this.periodicSync(), 8000);
 	}
 
 	stop() {
-		if (this.periodicSyncInterval) {
-			clearInterval(this.periodicSyncInterval);
-			this.periodicSyncInterval = null;
-		}
 		this.sse.disconnect();
 		this.connected = false;
 	}
@@ -90,8 +83,6 @@ export class SyncEngine {
 		// These run concurrently and progressively update the UI
 		this.fixBlankPreviews().catch(() => {});
 		this.resolveContacts().catch(() => {});
-		this.syncPinnedChats().catch(() => {});
-		this.syncUnreadCounts().catch(() => {});
 		this.syncEligibility().catch(() => {});
 		this.syncAllChatMessagesInBackground().catch(() => {});
 	}
@@ -168,10 +159,8 @@ export class SyncEngine {
 		// Fix chat previews that are blank due to invisible system messages or retractions
 		this.fixBlankPreviews().catch(() => {});
 
-		// Background: resolve any new contacts and pinned chats
+		// Background: resolve any new contacts
 		this.resolveContacts().catch(() => {});
-		this.syncPinnedChats().catch(() => {});
-		this.syncUnreadCounts().catch(() => {});
 	}
 
 	/**
@@ -517,27 +506,6 @@ export class SyncEngine {
 		}
 	}
 
-	private async syncUnreadCounts() {
-		try {
-			const res = await fetch('/api/unread-counts');
-			if (!res.ok) return;
-			const { data } = (await res.json()) as { data: Record<string, number> };
-			if (!data) return;
-
-			const chats = await db.chats.toArray();
-			await db.transaction('rw', db.chats, async () => {
-				for (const chat of chats) {
-					const count = data[chat.guid] ?? 0;
-					if (chat.unreadCount !== count) {
-						await db.chats.update(chat.guid, { unreadCount: count });
-					}
-				}
-			});
-		} catch {
-			// Silently fail — chat.db may not be accessible
-		}
-	}
-
 	private async fixBlankPreviews() {
 		// 1. Override previews for chats where the last visible message is retracted.
 		//    This must run for ALL chats (not just blanks) because the API may have
@@ -622,68 +590,6 @@ export class SyncEngine {
 			});
 		} catch {
 			// Silently fail — chat.db may not be accessible
-		}
-	}
-
-	private async syncPinnedChats() {
-		try {
-			const res = await fetch('/api/plist/pinned');
-			if (!res.ok) return;
-			const { data } = (await res.json()) as { data: string[] };
-			if (!Array.isArray(data)) return;
-
-			const pinnedSet = new Set(data);
-			const chats = await db.chats.toArray();
-
-			await db.transaction('rw', db.chats, async () => {
-				for (const chat of chats) {
-					const shouldBePinned = pinnedSet.has(chat.chatIdentifier);
-
-					if (chat.isPinned !== shouldBePinned) {
-						await db.chats.update(chat.guid, { isPinned: shouldBePinned });
-					}
-				}
-			});
-		} catch {
-			// Silently fail — plist may not be accessible
-		}
-	}
-
-	private async periodicSync() {
-		if (this.periodicSyncRunning) return;
-		this.periodicSyncRunning = true;
-		try {
-			await Promise.allSettled([
-				this.syncPinnedChats(),
-				this.syncUnreadCounts(),
-				this.detectDeletedChats()
-			]);
-		} finally {
-			this.periodicSyncRunning = false;
-		}
-	}
-
-	private async detectDeletedChats() {
-		try {
-			const chatRes = await proxyPost<Chat[]>('/api/proxy/chat/query', {
-				sort: 'lastmessage',
-				limit: 1000
-			});
-			if (!chatRes.data) return;
-
-			const apiGuids = new Set(chatRes.data.map((c) => c.guid));
-			const localChats = await db.chats.toArray();
-
-			await db.transaction('rw', [db.chats, db.messages], async () => {
-				for (const local of localChats) {
-					if (!apiGuids.has(local.guid)) {
-						await db.messages.where('chatGuid').equals(local.guid).delete();
-						await db.chats.delete(local.guid);
-					}
-				}
-			});
-		} catch {
-			// Silently fail
 		}
 	}
 

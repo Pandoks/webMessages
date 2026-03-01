@@ -16,7 +16,6 @@
 		isActive: boolean;
 		isPinned: boolean;
 		participants?: Participant[];
-		oncontextmenu?: (e: MouseEvent) => void;
 	}
 
 	let {
@@ -27,8 +26,7 @@
 		unreadCount,
 		isActive,
 		isPinned,
-		participants = [],
-		oncontextmenu
+		participants = []
 	}: Props = $props();
 
 	const displayLastMessage = $derived.by(() => {
@@ -45,7 +43,6 @@
 	href="/messages/{encodeURIComponent(guid)}"
 	class="group relative flex gap-3 px-4 py-3 transition-colors hover:bg-gray-50 dark:hover:bg-gray-800
 		{isActive ? 'bg-blue-50 dark:bg-blue-900/20' : ''}"
-	oncontextmenu={(e) => { if (oncontextmenu) { e.preventDefault(); oncontextmenu(e); } }}
 >
 	<ChatAvatar {participants} />
 	<div class="flex min-w-0 flex-1 flex-col">
