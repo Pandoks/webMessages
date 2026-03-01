@@ -16,6 +16,7 @@ export class SyncEngine {
 	private syncedChatGuids = new Set<string>();
 	private chatMessageSyncPromises = new Map<string, Promise<void>>();
 	private periodicSyncInterval: ReturnType<typeof setInterval> | null = null;
+	private periodicSyncRunning = false;
 
 	async start() {
 		this.sse.onEvent((type, data) => this.handleEvent(type, data));
@@ -597,17 +598,22 @@ export class SyncEngine {
 	}
 
 	private async periodicSync() {
-		await Promise.allSettled([
-			this.syncPinnedChats(),
-			this.syncUnreadCounts(),
-			this.detectDeletedChats()
-		]);
+		if (this.periodicSyncRunning) return;
+		this.periodicSyncRunning = true;
+		try {
+			await Promise.allSettled([
+				this.syncPinnedChats(),
+				this.syncUnreadCounts(),
+				this.detectDeletedChats()
+			]);
+		} finally {
+			this.periodicSyncRunning = false;
+		}
 	}
 
 	private async detectDeletedChats() {
 		try {
 			const chatRes = await proxyPost<Chat[]>('/api/proxy/chat/query', {
-				with: ['participants'],
 				sort: 'lastmessage',
 				limit: 1000
 			});
