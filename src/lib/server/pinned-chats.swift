@@ -1,26 +1,14 @@
 import Foundation
 
-// Load IMCore private framework to access pinned conversations
-// Uses fetchPinnedConversationIdentifiersFromLocalStore which reads from
-// NSUbiquitousKeyValueStore without needing the full IMDaemon connection.
-guard let bundle = Bundle(path: "/System/Library/PrivateFrameworks/IMCore.framework"),
-      bundle.load(),
-      let cls = NSClassFromString("IMPinnedConversationsController") else {
-    print("[]")
-    exit(0)
-}
+// Read pinned conversation identifiers from com.apple.messages.pinning via CFPreferences.
+// Outputs a JSON array of chat identifiers, e.g. ["+14089639933"].
 
-let sharedSel = NSSelectorFromString("sharedInstance")
-guard cls.responds(to: sharedSel),
-      let instance = (cls as AnyObject).perform(sharedSel)?.takeUnretainedValue() else {
-    print("[]")
-    exit(0)
-}
+let domain = "com.apple.messages.pinning" as CFString
+let user = kCFPreferencesCurrentUser
+let host = kCFPreferencesAnyHost
 
-let fetchSel = NSSelectorFromString("fetchPinnedConversationIdentifiersFromLocalStore")
-guard instance.responds(to: fetchSel),
-      let result = instance.perform(fetchSel)?.takeUnretainedValue() as? NSDictionary,
-      let pinned = result["pP"] as? [String] else {
+guard let pD = CFPreferencesCopyValue("pD" as CFString, domain, user, host) as? [String: Any],
+      let pinned = pD["pP"] as? [String] else {
     print("[]")
     exit(0)
 }

@@ -174,7 +174,7 @@
 
 		if (visibilityStore.isActive) {
 			const timer = setTimeout(() => {
-				fetch(`/api/proxy/chat/${encodeURIComponent(chatGuid)}/read`, { method: 'POST' });
+				fetch('/api/chat-read', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ guid: chatGuid, read: true }) });
 			}, 2000);
 			return () => clearTimeout(timer);
 		} else {
@@ -188,7 +188,7 @@
 
 		const timer = setTimeout(() => {
 			pendingReadReceipt = false;
-			fetch(`/api/proxy/chat/${encodeURIComponent(chatGuid)}/read`, { method: 'POST' });
+			fetch('/api/chat-read', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ guid: chatGuid, read: true }) });
 		}, 2000);
 		return () => clearTimeout(timer);
 	});

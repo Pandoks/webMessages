@@ -167,21 +167,25 @@
 
 	async function handleToggleRead(chat: DbChat) {
 		const allGuids = siblingGuidsMap.get(chat.guid) ?? [chat.guid];
-		if (chat.unreadCount > 0) {
-			// Mark as read
-			for (const guid of allGuids) {
-				await db.chats.update(guid, { unreadCount: 0 });
-			}
-			for (const guid of allGuids) {
-				fetch(`/api/proxy/chat/${encodeURIComponent(guid)}/read`, { method: 'POST' }).catch(() => {});
-			}
-		} else {
-			// Mark as unread
-			for (const guid of allGuids) {
-				await db.chats.update(guid, { unreadCount: 1 });
-			}
-			for (const guid of allGuids) {
-				fetch(`/api/proxy/chat/${encodeURIComponent(guid)}/unread`, { method: 'POST' }).catch(() => {});
+		const markRead = chat.unreadCount > 0;
+		// Optimistic update
+		for (const guid of allGuids) {
+			await db.chats.update(guid, { unreadCount: markRead ? 0 : 1 });
+		}
+		// Write directly to chat.db (bypasses imessage-rs Private API requirement)
+		for (const guid of allGuids) {
+			try {
+				const res = await fetch('/api/chat-read', {
+					method: 'POST',
+					headers: { 'Content-Type': 'application/json' },
+					body: JSON.stringify({ guid, read: markRead })
+				});
+				if (!res.ok) {
+					// Revert on failure
+					await db.chats.update(guid, { unreadCount: markRead ? 1 : 0 });
+				}
+			} catch {
+				await db.chats.update(guid, { unreadCount: markRead ? 1 : 0 });
 			}
 		}
 	}
@@ -199,11 +203,18 @@
 					await goto('/messages');
 				}
 
-				// Delete from IndexedDB and API
+				// Delete via API first, then remove from IndexedDB
 				for (const guid of allGuids) {
-					await db.messages.where('chatGuid').equals(guid).delete();
-					await db.chats.delete(guid);
-					fetch(`/api/proxy/chat/${encodeURIComponent(guid)}`, { method: 'DELETE' }).catch(() => {});
+					try {
+						const res = await fetch(`/api/proxy/chat/${encodeURIComponent(guid)}`, { method: 'DELETE' });
+						if (res.ok || res.status === 404) {
+							// 404 means already deleted — clean up local state too
+							await db.messages.where('chatGuid').equals(guid).delete();
+							await db.chats.delete(guid);
+						}
+					} catch {
+						// Network error — don't delete locally
+					}
 				}
 			}
 		};
