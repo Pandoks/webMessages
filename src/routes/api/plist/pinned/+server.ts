@@ -33,6 +33,7 @@ export const POST: RequestHandler = async ({ request }) => {
 		typeof body !== 'object' ||
 		body === null ||
 		typeof (body as Record<string, unknown>).chatIdentifier !== 'string' ||
+		!(body as Record<string, unknown>).chatIdentifier ||
 		typeof (body as Record<string, unknown>).pinned !== 'boolean'
 	) {
 		return json(
