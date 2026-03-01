@@ -51,11 +51,9 @@
 		} | null;
 		selectedId: string | null;
 		onSelect: (id: string) => void;
-		starred: Set<string>;
-		onToggleStar: (id: string) => void;
 	}
 
-	let { devices, friends, myLocation, selectedId, onSelect, starred, onToggleStar }: Props = $props();
+	let { devices, friends, myLocation, selectedId, onSelect }: Props = $props();
 
 	let activeTab = $state<Tab>('people');
 	let search = $state('');
@@ -66,13 +64,7 @@
 		const filtered = q
 			? friends.filter((f) => f.displayName.toLowerCase().includes(q))
 			: friends;
-		return [...filtered].sort((a, b) => {
-			const aStarred = starred.has(a.handle);
-			const bStarred = starred.has(b.handle);
-			if (aStarred && !bStarred) return -1;
-			if (!aStarred && bStarred) return 1;
-			return a.displayName.localeCompare(b.displayName);
-		});
+		return [...filtered].sort((a, b) => a.displayName.localeCompare(b.displayName));
 	});
 
 	const filteredDevices = $derived.by(() => {
@@ -80,13 +72,7 @@
 		const filtered = q
 			? devices.filter((d) => d.name.toLowerCase().includes(q))
 			: devices;
-		return [...filtered].sort((a, b) => {
-			const aStarred = starred.has(a.id);
-			const bStarred = starred.has(b.id);
-			if (aStarred && !bStarred) return -1;
-			if (!aStarred && bStarred) return 1;
-			return a.name.localeCompare(b.name);
-		});
+		return [...filtered].sort((a, b) => a.name.localeCompare(b.name));
 	});
 
 	async function handleRefresh() {
@@ -154,11 +140,9 @@
 					id="__me__"
 					name={myLocation.name}
 					subtitle={buildSubtitle(myLocation.address, myLocation.timestamp)}
-					isStarred={false}
 					isSelected={selectedId === '__me__'}
 					avatarUrl={myLocation.photoBase64 ? `data:image/jpeg;base64,${myLocation.photoBase64}` : null}
 					{onSelect}
-					onToggleStar={() => {}}
 				/>
 			{/if}
 			{#each filteredFriends as friend (friend.handle)}
@@ -167,11 +151,9 @@
 					name={friend.displayName}
 					subtitle={buildSubtitle(friend.address, friend.locationTimestamp)}
 					distance={getDistanceFromMe(friend.latitude, friend.longitude)}
-					isStarred={starred.has(friend.handle)}
 					isSelected={selectedId === friend.handle}
 					avatarUrl={getAvatarUrl(friend)}
 					{onSelect}
-					{onToggleStar}
 				/>
 			{:else}
 				<p class="p-4 text-center text-sm text-gray-400">No people found</p>
@@ -183,11 +165,9 @@
 					name={device.name}
 					subtitle={buildSubtitle(device.address, device.locationTimestamp)}
 					distance={getDistanceFromMe(device.latitude, device.longitude)}
-					isStarred={starred.has(device.id)}
 					isSelected={selectedId === device.id}
 					emoji={getDeviceEmoji(device)}
 					{onSelect}
-					{onToggleStar}
 				/>
 			{:else}
 				<p class="p-4 text-center text-sm text-gray-400">No devices found</p>

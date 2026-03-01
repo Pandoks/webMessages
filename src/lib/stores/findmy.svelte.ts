@@ -43,24 +43,8 @@ class FindMyStore {
 	} | null>(null);
 	loading = $state(false);
 	error = $state<string | null>(null);
-	starred = $state<Set<string>>(new Set());
 	private cachedContactMap: Record<string, string> = {};
 	private cachedPhotoMap: Record<string, string> = {};
-
-	constructor() {
-		if (typeof localStorage !== 'undefined') {
-			const saved = localStorage.getItem('findmy-starred');
-			if (saved) {
-				this.starred = new Set(JSON.parse(saved));
-			}
-		}
-	}
-
-	private saveStarred() {
-		if (typeof localStorage !== 'undefined') {
-			localStorage.setItem('findmy-starred', JSON.stringify([...this.starred]));
-		}
-	}
 
 	private transformDevice(raw: RawDevice): FindMyDevice {
 		return {
@@ -132,21 +116,6 @@ class FindMyStore {
 		}
 
 		return merged;
-	}
-
-	toggleStar(id: string) {
-		const next = new Set(this.starred);
-		if (next.has(id)) {
-			next.delete(id);
-		} else {
-			next.add(id);
-		}
-		this.starred = next;
-		this.saveStarred();
-	}
-
-	isStarred(id: string): boolean {
-		return this.starred.has(id);
 	}
 
 	async fetchDevices() {

@@ -45,8 +45,6 @@
 		myLocation={findMyStore.myLocation}
 		{selectedId}
 		onSelect={(id) => (selectedId = id)}
-		starred={findMyStore.starred}
-		onToggleStar={(id) => findMyStore.toggleStar(id)}
 	/>
 	<div class="relative flex-1">
 		<FindMyMap

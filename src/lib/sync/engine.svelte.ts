@@ -55,6 +55,7 @@ export class SyncEngine {
 					const existing = await db.chats.get(dbChat.guid);
 					if (existing) {
 						dbChat.isPinned = existing.isPinned;
+						dbChat.unreadCount = existing.unreadCount;
 					}
 					await db.chats.put(dbChat);
 
@@ -77,6 +78,7 @@ export class SyncEngine {
 		// These run concurrently and progressively update the UI
 		this.resolveContacts().catch(() => {});
 		this.syncPinnedChats().catch(() => {});
+		this.syncUnreadCounts().catch(() => {});
 		this.syncAllChatMessagesInBackground().catch(() => {});
 	}
 
@@ -146,6 +148,7 @@ export class SyncEngine {
 		// Background: resolve any new contacts and pinned chats
 		this.resolveContacts().catch(() => {});
 		this.syncPinnedChats().catch(() => {});
+		this.syncUnreadCounts().catch(() => {});
 	}
 
 	/**
@@ -425,6 +428,27 @@ export class SyncEngine {
 					await db.handles.update(h.address, { displayName: '' });
 				}
 			});
+		}
+	}
+
+	private async syncUnreadCounts() {
+		try {
+			const res = await fetch('/api/unread-counts');
+			if (!res.ok) return;
+			const { data } = (await res.json()) as { data: Record<string, number> };
+			if (!data) return;
+
+			const chats = await db.chats.toArray();
+			await db.transaction('rw', db.chats, async () => {
+				for (const chat of chats) {
+					const count = data[chat.guid] ?? 0;
+					if (chat.unreadCount !== count) {
+						await db.chats.update(chat.guid, { unreadCount: count });
+					}
+				}
+			});
+		} catch {
+			// Silently fail — chat.db may not be accessible
 		}
 	}
 
