@@ -1,7 +1,7 @@
 import Foundation
 
 // Usage: pin-chat <chatIdentifier> <pin|unpin>
-// Adds or removes a chat from the IMCore pinned conversations local store.
+// Reads/writes ~/Library/Preferences/com.apple.messages.pinning.plist directly.
 // Outputs {"ok":true} on success, writes errors to stderr and exits with code 1.
 
 guard CommandLine.arguments.count == 3 else {
@@ -17,67 +17,42 @@ guard action == "pin" || action == "unpin" else {
     exit(1)
 }
 
-// Load IMCore private framework
-guard let bundle = Bundle(path: "/System/Library/PrivateFrameworks/IMCore.framework"),
-      bundle.load(),
-      let cls = NSClassFromString("IMPinnedConversationsController") else {
-    fputs("Error: failed to load IMCore framework\n", stderr)
-    exit(1)
+let plistPath = NSString("~/Library/Preferences/com.apple.messages.pinning.plist").expandingTildeInPath
+
+// Read existing plist
+var root: [String: Any] = [:]
+if let dict = NSDictionary(contentsOfFile: plistPath) as? [String: Any] {
+    root = dict
 }
 
-let sharedSel = NSSelectorFromString("sharedInstance")
-guard cls.responds(to: sharedSel),
-      let instance = (cls as AnyObject).perform(sharedSel)?.takeUnretainedValue() else {
-    fputs("Error: failed to get IMPinnedConversationsController.sharedInstance()\n", stderr)
-    exit(1)
-}
-
-// Fetch current pinned conversation identifiers from local store
-let fetchSel = NSSelectorFromString("fetchPinnedConversationIdentifiersFromLocalStore")
-var currentPinned: [String] = []
-var currentVersion: Int = 1
-
-if instance.responds(to: fetchSel),
-   let result = instance.perform(fetchSel)?.takeUnretainedValue() as? NSDictionary {
-    currentPinned = result["pP"] as? [String] ?? []
-    currentVersion = result["pV"] as? Int ?? 1
-}
-
-// Modify the pinned list
-var newPinned = currentPinned
+var pD = root["pD"] as? [String: Any] ?? ["pV": 1, "pR": 2, "pZ": [:] as [String: Any]]
+var pinned = pD["pP"] as? [String] ?? []
 
 if action == "pin" {
-    // Remove if already present (to avoid duplicates), then insert at front (index 0)
-    newPinned.removeAll { $0 == chatIdentifier }
-    newPinned.insert(chatIdentifier, at: 0)
+    pinned.removeAll { $0 == chatIdentifier }
+    pinned.insert(chatIdentifier, at: 0)
 } else {
-    // unpin: remove all occurrences (idempotent -- no error if already absent)
-    newPinned.removeAll { $0 == chatIdentifier }
+    pinned.removeAll { $0 == chatIdentifier }
 }
 
-// Build the dictionary to write back
-let newDict: NSDictionary = ["pP": newPinned, "pV": currentVersion]
+pD["pP"] = pinned
+pD["pT"] = Date()
+pD["pU"] = "contextMenu"
+root["pD"] = pD
 
-// Try the IMCore setter method first
-let setterSel = NSSelectorFromString("setPinnedConversationIdentifiersInLocalStore:")
-
-var wrote = false
-
-if instance.responds(to: setterSel) {
-    _ = instance.perform(setterSel, with: newDict)
-    wrote = true
+let nsRoot = NSDictionary(dictionary: root)
+if !nsRoot.write(toFile: plistPath, atomically: true) {
+    fputs("Error: failed to write plist to \(plistPath)\n", stderr)
+    exit(1)
 }
 
-// Fallback: write directly to NSUbiquitousKeyValueStore
-if !wrote {
-    let store = NSUbiquitousKeyValueStore.default
-    store.set(newDict, forKey: "IMPinnedConversations")
-    let synced = store.synchronize()
-    if !synced {
-        fputs("Error: NSUbiquitousKeyValueStore.synchronize() returned false\n", stderr)
-        exit(1)
-    }
-    wrote = true
-}
+// Notify cfprefsd to reload so Messages.app picks up the change
+let proc = Process()
+proc.executableURL = URL(fileURLWithPath: "/usr/bin/defaults")
+proc.arguments = ["read", "com.apple.messages.pinning"]
+proc.standardOutput = FileHandle.nullDevice
+proc.standardError = FileHandle.nullDevice
+try? proc.run()
+proc.waitUntilExit()
 
 print("{\"ok\":true}")
