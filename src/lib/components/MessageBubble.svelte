@@ -37,6 +37,14 @@
 	let schedEditText = $state('');
 	let schedEditDate = $state('');
 	let schedEditTime = $state('');
+	let bubbleEl: HTMLDivElement | undefined = $state();
+	let frozenWidth: string | null = $state(null);
+
+	function autoResize(textarea: HTMLTextAreaElement) {
+		textarea.style.height = 'auto';
+		textarea.style.height = textarea.scrollHeight + 'px';
+		return { destroy() {} };
+	}
 
 	// Close context menu on scroll
 	$effect(() => {
@@ -198,6 +206,7 @@
 	}
 
 	function startEdit() {
+		if (bubbleEl) frozenWidth = bubbleEl.offsetWidth + 'px';
 		editText = message.text ?? '';
 		editing = true;
 		closeContextMenu();
@@ -206,10 +215,12 @@
 	async function saveEdit() {
 		await onEdit(message.guid, editText);
 		editing = false;
+		frozenWidth = null;
 	}
 
 	function cancelEdit() {
 		editing = false;
+		frozenWidth = null;
 	}
 
 	function handleEditKeydown(e: KeyboardEvent) {
@@ -222,6 +233,7 @@
 	}
 
 	function startScheduleEdit() {
+		if (bubbleEl) frozenWidth = bubbleEl.offsetWidth + 'px';
 		schedEditText = message.text ?? '';
 		const d = new Date(message.dateCreated);
 		schedEditDate = d.toISOString().slice(0, 10);
@@ -242,10 +254,12 @@
 			timeChanged ? newMs : undefined
 		);
 		editingSchedule = false;
+		frozenWidth = null;
 	}
 
 	function cancelScheduleEdit() {
 		editingSchedule = false;
+		frozenWidth = null;
 	}
 
 	function handleScheduleEditKeydown(e: KeyboardEvent) {
@@ -293,11 +307,13 @@
 			<span class="text-xs italic text-gray-400">You unsent a message {messageTime}</span>
 		{:else}
 		<div
+			bind:this={bubbleEl}
 			class="rounded-2xl px-3 py-2 {isScheduled
 				? 'border-2 border-dashed border-blue-400 bg-transparent'
 				: isSent
 					? 'bg-blue-500 text-white'
 					: 'bg-gray-200 text-gray-900 dark:bg-gray-700 dark:text-white'}"
+			style:min-width={frozenWidth}
 		>
 			{#if isScheduled}
 				<div class="mb-1 flex items-center gap-1 text-xs text-blue-500 dark:text-blue-400">
@@ -313,8 +329,10 @@
 					<textarea
 						bind:value={schedEditText}
 						onkeydown={handleScheduleEditKeydown}
+						oninput={(e) => autoResize(e.currentTarget)}
+						use:autoResize
 						class="w-full resize-none rounded-lg bg-blue-100 px-2 py-1 text-sm text-blue-800 outline-none dark:bg-blue-900/30 dark:text-blue-200"
-						rows="2"
+						rows="1"
 						placeholder="Message text"
 					></textarea>
 					<div class="flex gap-1.5">
@@ -349,8 +367,10 @@
 					<textarea
 						bind:value={editText}
 						onkeydown={handleEditKeydown}
+						oninput={(e) => autoResize(e.currentTarget)}
+						use:autoResize
 						class="w-full resize-none rounded-lg bg-white/20 px-2 py-1 text-sm text-inherit outline-none placeholder:text-white/50"
-						rows="2"
+						rows="1"
 					></textarea>
 					<div class="flex justify-end gap-1">
 						<button
