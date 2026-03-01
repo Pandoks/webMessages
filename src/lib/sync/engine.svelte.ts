@@ -430,7 +430,6 @@ export class SyncEngine {
 
 	private async resolveContacts() {
 		const handles = await db.handles.filter((h) => !h.displayName).toArray();
-		if (!handles.length) return;
 
 		try {
 			const res = await fetch('/api/contacts');
@@ -441,27 +440,71 @@ export class SyncEngine {
 				photos: Record<string, string>;
 			};
 
-			await db.transaction('rw', db.handles, async () => {
-				for (const h of handles) {
-					const normalized = h.address.replace(/[\s\-()]/g, '').toLowerCase();
-					const name = data?.[normalized];
-					const avatar = photos?.[normalized];
-					const updates: Record<string, string> = {
-						displayName: name || ''
-					};
-					if (avatar) {
-						updates.avatarBase64 = avatar;
+			// Step 1: Update existing handles that don't have a displayName yet
+			if (handles.length) {
+				await db.transaction('rw', db.handles, async () => {
+					for (const h of handles) {
+						const normalized = h.address.replace(/[\s\-()]/g, '').toLowerCase();
+						const name = data?.[normalized];
+						const avatar = photos?.[normalized];
+						const updates: Record<string, string> = {
+							displayName: name || ''
+						};
+						if (avatar) {
+							updates.avatarBase64 = avatar;
+						}
+						await db.handles.update(h.address, updates);
 					}
-					await db.handles.update(h.address, updates);
+				});
+			}
+
+			// Step 2: Insert new handle entries for AddressBook contacts not already in Dexie
+			const existingAddresses = new Set(
+				(await db.handles.toCollection().primaryKeys()) as string[]
+			);
+
+			// Deduplicate by displayName: prefer phone over email
+			const nameToAddress = new Map<string, { address: string; isPhone: boolean }>();
+			for (const [address, name] of Object.entries(data)) {
+				if (!name) continue;
+				const isPhone = /^\+?\d/.test(address);
+				const existing = nameToAddress.get(name);
+				if (!existing || (isPhone && !existing.isPhone)) {
+					nameToAddress.set(name, { address, isPhone });
 				}
-			});
+			}
+
+			const newHandles: {
+				address: string;
+				service: string;
+				country: string;
+				displayName: string | null;
+				avatarBase64: string | null;
+			}[] = [];
+
+			for (const [name, { address }] of nameToAddress) {
+				if (existingAddresses.has(address)) continue;
+				newHandles.push({
+					address,
+					service: 'iMessage',
+					country: '',
+					displayName: name,
+					avatarBase64: photos?.[address] ?? null
+				});
+			}
+
+			if (newHandles.length) {
+				await db.handles.bulkPut(newHandles);
+			}
 		} catch {
 			// AddressBook not available — mark as resolved with empty name
-			await db.transaction('rw', db.handles, async () => {
-				for (const h of handles) {
-					await db.handles.update(h.address, { displayName: '' });
-				}
-			});
+			if (handles.length) {
+				await db.transaction('rw', db.handles, async () => {
+					for (const h of handles) {
+						await db.handles.update(h.address, { displayName: '' });
+					}
+				});
+			}
 		}
 	}
 
