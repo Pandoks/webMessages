@@ -45,6 +45,7 @@ class FindMyStore {
 	error = $state<string | null>(null);
 	private cachedContactMap: Record<string, string> = {};
 	private cachedPhotoMap: Record<string, string> = {};
+	private locationWatchId: number | null = null;
 
 	private transformDevice(raw: RawDevice): FindMyDevice {
 		return {
@@ -235,49 +236,69 @@ class FindMyStore {
 		this.loading = false;
 	}
 
-	async fetchMyLocation() {
+	async watchMyLocation() {
 		if (typeof navigator === 'undefined' || !navigator.geolocation) return;
+		this.stopWatchingMyLocation();
 
-		// Fetch profile info and geolocation in parallel
-		const [profile, coords] = await Promise.all([
-			fetch('/api/me')
-				.then((r) => r.json())
-				.catch(() => ({ name: 'Me', photoBase64: null })),
-			new Promise<GeolocationPosition | null>((resolve) => {
-				navigator.geolocation.getCurrentPosition(
-					(pos) => resolve(pos),
-					() => resolve(null),
-					{ enableHighAccuracy: true, timeout: 10000 }
-				);
-			})
-		]);
+		const profile = await fetch('/api/me')
+			.then((r) => r.json())
+			.catch(() => ({ name: 'Me', photoBase64: null }));
 
-		if (!coords) return;
+		this.locationWatchId = navigator.geolocation.watchPosition(
+			(pos) => {
+				const lat = pos.coords.latitude;
+				const lon = pos.coords.longitude;
+				const prev = this.myLocation;
+				const shouldGeocode =
+					!prev || this.haversineMeters(prev.latitude, prev.longitude, lat, lon) > 100;
 
-		const lat = coords.coords.latitude;
-		const lon = coords.coords.longitude;
+				this.myLocation = {
+					latitude: lat,
+					longitude: lon,
+					timestamp: pos.timestamp,
+					address: prev?.address ?? null,
+					name: profile.name || 'Me',
+					photoBase64: profile.photoBase64
+				};
 
-		// Show "Me" card immediately with GPS coords, geocode address in background
-		this.myLocation = {
-			latitude: lat,
-			longitude: lon,
-			timestamp: coords.timestamp,
-			address: null,
-			name: profile.name || 'Me',
-			photoBase64: profile.photoBase64
-		};
+				if (shouldGeocode) {
+					this.geocodeMyLocation(lat, lon);
+				}
+			},
+			() => {},
+			{ enableHighAccuracy: true }
+		);
+	}
 
-		// Reverse geocode in background — updates the card when ready
+	stopWatchingMyLocation() {
+		if (this.locationWatchId != null) {
+			navigator.geolocation.clearWatch(this.locationWatchId);
+			this.locationWatchId = null;
+		}
+	}
+
+	private async geocodeMyLocation(lat: number, lon: number) {
 		try {
 			const res = await fetch(`/api/geocode?coords=${lat},${lon}`);
 			const { data } = await res.json();
 			const address = data?.[`${lat},${lon}`] ?? null;
-			if (address) {
-				this.myLocation = { ...this.myLocation!, address };
+			if (address && this.myLocation) {
+				this.myLocation = { ...this.myLocation, address };
 			}
 		} catch {
 			// geocoding failed, address stays null
 		}
+	}
+
+	private haversineMeters(lat1: number, lon1: number, lat2: number, lon2: number): number {
+		const toRad = (n: number) => (n * Math.PI) / 180;
+		const R = 6371000;
+		const dLat = toRad(lat2 - lat1);
+		const dLon = toRad(lon2 - lon1);
+		const a =
+			Math.sin(dLat / 2) ** 2 +
+			Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
+		return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 	}
 }
 
