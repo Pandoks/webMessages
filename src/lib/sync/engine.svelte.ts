@@ -86,6 +86,7 @@ export class SyncEngine {
 
 		// Step 2: Background tasks — don't block UI
 		// These run concurrently and progressively update the UI
+		this.syncPinnedChats().catch(() => {});
 		this.fixBlankPreviews().catch(() => {});
 		this.resolveContacts().catch(() => {});
 		this.syncEligibility().catch(() => {});
@@ -157,10 +158,9 @@ export class SyncEngine {
 			this.syncing = false;
 		}
 
-		// Fix chat previews that are blank due to invisible system messages or retractions
+		// Background: sync pinned state, fix blank previews, resolve contacts
+		this.syncPinnedChats().catch(() => {});
 		this.fixBlankPreviews().catch(() => {});
-
-		// Background: resolve any new contacts
 		this.resolveContacts().catch(() => {});
 	}
 
@@ -501,6 +501,27 @@ export class SyncEngine {
 				});
 			}
 		}
+	}
+
+	private async syncPinnedChats() {
+		try {
+			const res = await fetch('/api/plist/pinned');
+			if (!res.ok) return;
+			const { data } = (await res.json()) as { data: string[] };
+			if (!data?.length) return;
+
+			const pinnedSet = new Set(data);
+			const chats = await db.chats.toArray();
+
+			await db.transaction('rw', db.chats, async () => {
+				for (const chat of chats) {
+					const shouldBePinned = pinnedSet.has(chat.chatIdentifier);
+					if (chat.isPinned !== shouldBePinned) {
+						await db.chats.update(chat.guid, { isPinned: shouldBePinned });
+					}
+				}
+			});
+		} catch {}
 	}
 
 	private async fixBlankPreviews() {
