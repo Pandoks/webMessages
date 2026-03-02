@@ -42,29 +42,22 @@ jobs:
             -o dist/bin/reverse-geocode \
             -framework CoreLocation
 
-      - name: Download imessage-rs
-        env:
-          GH_TOKEN: ${{ github.token }}
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: cargo-imessage-rs-${{ runner.os }}
+
+      - name: Build imessage-rs
         run: |
-          ARCH=$(uname -m)
-          case "$ARCH" in
-            arm64) TARGET="aarch64-apple-darwin" ;;
-            x86_64) TARGET="x86_64-apple-darwin" ;;
-          esac
-
-          TAG=$(gh release view --repo jesec/imessage-rs --json tagName -q .tagName)
-          echo "imessage-rs version: $TAG"
-
-          URL="https://github.com/jesec/imessage-rs/releases/download/${TAG}/imessage-rs-${TARGET}.tar.gz"
-          if curl -sfL "$URL" -o /tmp/imessage-rs.tar.gz; then
-            tar -xzf /tmp/imessage-rs.tar.gz -C dist/bin/
-          else
-            echo "Pre-built binary not found, building from source..."
-            curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
-            source "$HOME/.cargo/env"
-            cargo install imessage-rs --root /tmp/imessage-rs-build
-            cp /tmp/imessage-rs-build/bin/imessage-rs dist/bin/
-          fi
+          cargo install imessage-rs --root /tmp/imessage-rs-build
+          mkdir -p dist/bin
+          cp /tmp/imessage-rs-build/bin/imessage-rs dist/bin/
 
       - name: Build SvelteKit
         run: IMESSAGE_RS_PASSWORD=build-placeholder pnpm build
