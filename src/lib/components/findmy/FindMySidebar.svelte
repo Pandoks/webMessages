@@ -146,8 +146,8 @@
 					id="__me__"
 					name={myLocation.name}
 					subtitle={myLocation.approximate
-					? `Approximate location${myLocation.address ? ` · ${myLocation.address}` : ''}`
-					: buildSubtitle(myLocation.address, myLocation.timestamp)}
+						? `Approximate location${myLocation.address ? ` · ${myLocation.address}` : ''}`
+						: buildSubtitle(myLocation.address, myLocation.timestamp)}
 					isSelected={selectedId === '__me__'}
 					avatarUrl={myLocation.photoBase64
 						? `data:image/jpeg;base64,${myLocation.photoBase64}`
