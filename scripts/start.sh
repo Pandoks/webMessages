@@ -1,25 +1,29 @@
 #!/usr/bin/env bash
 # webMessages — start imessage-rs + Node server in foreground
-# On first run: prompts for password, writes config
+# No files written, no prompts. Override defaults with env vars:
+#   PORT=8080 IMESSAGE_RS_PORT=5000 ./start.sh
 # Press Ctrl+C to stop both services
 
 set -euo pipefail
 
 WEBMESSAGES_HOME="${WEBMESSAGES_HOME:-$HOME/.webmessages}"
-ENV_FILE="$WEBMESSAGES_HOME/.env"
 
 # ── Colors ──────────────────────────────────────────────
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[0;33m'
 CYAN='\033[0;36m'
-BOLD='\033[1m'
 NC='\033[0m'
 
 info()  { printf "${CYAN}[info]${NC}  %s\n" "$*"; }
 ok()    { printf "${GREEN}[ok]${NC}    %s\n" "$*"; }
 warn()  { printf "${YELLOW}[warn]${NC}  %s\n" "$*"; }
 err()   { printf "${RED}[error]${NC} %s\n" "$*"; }
+
+# ── Find a free port ─────────────────────────────────────
+free_port() {
+	python3 -c 'import socket; s=socket.socket(); s.bind(("",0)); print(s.getsockname()[1]); s.close()'
+}
 
 # ── Pre-flight checks ──────────────────────────────────
 preflight() {
@@ -78,66 +82,12 @@ info "Running pre-flight checks..."
 preflight
 echo ""
 
-# ── First-run setup ────────────────────────────────────
-if [[ ! -f "$ENV_FILE" ]]; then
-	printf "${BOLD}First-time setup${NC}\n"
-	echo ""
-
-	# Password
-	info "Choose a password for the imessage-rs API."
-	info "This secures the connection between the web server and imessage-rs."
-	echo ""
-	read -s -p "  Password: " IMESSAGE_RS_PASSWORD
-	echo ""
-	if [[ -z "$IMESSAGE_RS_PASSWORD" ]]; then
-		err "Password cannot be empty"
-		exit 1
-	fi
-	read -s -p "  Confirm:  " CONFIRM_PASSWORD
-	echo ""
-	if [[ "$IMESSAGE_RS_PASSWORD" != "$CONFIRM_PASSWORD" ]]; then
-		err "Passwords don't match"
-		exit 1
-	fi
-
-	# Port
-	echo ""
-	read -p "  Web server port [3000]: " PORT
-	PORT="${PORT:-3000}"
-
-	# Write .env
-	cat > "$ENV_FILE" <<-ENVEOF
-	IMESSAGE_RS_PASSWORD=$IMESSAGE_RS_PASSWORD
-	IMESSAGE_RS_URL=http://127.0.0.1:1234
-	WEBMESSAGES_BIN_DIR=$WEBMESSAGES_HOME/bin
-	PORT=$PORT
-	ENVEOF
-
-	ok ".env created"
-
-	# Configure imessage-rs
-	IMESSAGERS_CONFIG_DIR="$HOME/Library/Application Support/imessage-rs"
-	IMESSAGERS_CONFIG="$IMESSAGERS_CONFIG_DIR/config.yml"
-
-	if [[ ! -f "$IMESSAGERS_CONFIG" ]]; then
-		mkdir -p "$IMESSAGERS_CONFIG_DIR"
-		cat > "$IMESSAGERS_CONFIG" <<-CFGEOF
-		password: "$IMESSAGE_RS_PASSWORD"
-		enable_private_api: true
-		enable_findmy_private_api: true
-		webhooks:
-		  - "http://localhost:${PORT}/api/webhook"
-		CFGEOF
-		ok "imessage-rs config created"
-	fi
-
-	echo ""
-fi
-
-# ── Load environment ────────────────────────────────────
-set -a
-source "$ENV_FILE"
-set +a
+# ── Resolve config (env vars or auto-detect) ─────────────
+IMESSAGE_RS_PASSWORD="${IMESSAGE_RS_PASSWORD:-$(openssl rand -hex 16)}"
+IMESSAGE_RS_PORT="${IMESSAGE_RS_PORT:-$(free_port)}"
+PORT="${PORT:-$(free_port)}"
+IMESSAGE_RS_URL="http://127.0.0.1:${IMESSAGE_RS_PORT}"
+WEBMESSAGES_BIN_DIR="$WEBMESSAGES_HOME/bin"
 
 # ── Cleanup on exit ────────────────────────────────────
 IMESSAGE_RS_PID=""
@@ -158,19 +108,23 @@ cleanup() {
 }
 trap cleanup SIGINT SIGTERM EXIT
 
-# ── Start imessage-rs ──────────────────────────────────
+# ── Start imessage-rs (CLI flags only, no config file) ───
 IMESSAGE_RS_BIN="$WEBMESSAGES_HOME/bin/imessage-rs"
 if [[ ! -x "$IMESSAGE_RS_BIN" ]]; then
 	err "imessage-rs binary not found at $IMESSAGE_RS_BIN"
 	exit 1
 fi
 
-info "Starting imessage-rs..."
-"$IMESSAGE_RS_BIN" --password "$IMESSAGE_RS_PASSWORD" &
+info "Starting imessage-rs on port $IMESSAGE_RS_PORT..."
+"$IMESSAGE_RS_BIN" \
+	--password "$IMESSAGE_RS_PASSWORD" \
+	--socket-port "$IMESSAGE_RS_PORT" \
+	--enable-private-api true \
+	--enable-findmy-private-api true \
+	--webhook "http://localhost:${PORT}/api/webhook" &
 IMESSAGE_RS_PID=$!
 
 # Wait for imessage-rs to be ready
-IMESSAGE_RS_URL="${IMESSAGE_RS_URL:-http://127.0.0.1:1234}"
 printf "${CYAN}[info]${NC}  Waiting for imessage-rs"
 for i in $(seq 1 30); do
 	if curl -sf "${IMESSAGE_RS_URL}/api/v1/server/info?password=${IMESSAGE_RS_PASSWORD}" >/dev/null 2>&1; then
@@ -193,9 +147,13 @@ for i in $(seq 1 30); do
 done
 
 # ── Start Node.js server ──────────────────────────────
-info "Starting webMessages on port ${PORT:-3000}..."
+info "Starting webMessages on port $PORT..."
 cd "$WEBMESSAGES_HOME/web"
-node --env-file "$ENV_FILE" build &
+IMESSAGE_RS_URL="$IMESSAGE_RS_URL" \
+IMESSAGE_RS_PASSWORD="$IMESSAGE_RS_PASSWORD" \
+WEBMESSAGES_BIN_DIR="$WEBMESSAGES_BIN_DIR" \
+PORT="$PORT" \
+node build &
 NODE_PID=$!
 
 sleep 1
@@ -205,7 +163,7 @@ if ! kill -0 "$NODE_PID" 2>/dev/null; then
 fi
 
 echo ""
-ok "webMessages is running at http://localhost:${PORT:-3000}"
+ok "webMessages is running at http://localhost:${PORT}"
 info "Press Ctrl+C to stop."
 echo ""
 
