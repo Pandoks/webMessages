@@ -168,7 +168,9 @@ info "Press Ctrl+C to stop."
 echo ""
 
 # ── Wait for either process to exit ───────────────────
-wait -n "$IMESSAGE_RS_PID" "$NODE_PID" 2>/dev/null || true
+while kill -0 "$IMESSAGE_RS_PID" 2>/dev/null && kill -0 "$NODE_PID" 2>/dev/null; do
+	wait -n "$IMESSAGE_RS_PID" "$NODE_PID" 2>/dev/null || true
+done
 
 if ! kill -0 "$IMESSAGE_RS_PID" 2>/dev/null; then
 	err "imessage-rs exited unexpectedly"
