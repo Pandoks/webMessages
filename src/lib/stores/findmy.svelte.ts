@@ -40,6 +40,7 @@ class FindMyStore {
 		address: string | null;
 		name: string;
 		photoBase64: string | null;
+		approximate: boolean;
 	} | null>(null);
 	loading = $state(false);
 	error = $state<string | null>(null);
@@ -237,12 +238,16 @@ class FindMyStore {
 	}
 
 	async watchMyLocation() {
-		if (typeof navigator === 'undefined' || !navigator.geolocation) return;
-		this.stopWatchingMyLocation();
-
 		const profile = await fetch('/api/me')
 			.then((r) => r.json())
 			.catch(() => ({ name: 'Me', photoBase64: null }));
+
+		if (typeof navigator === 'undefined' || !navigator.geolocation) {
+			await this.fallbackToIpLocation(profile);
+			return;
+		}
+
+		this.stopWatchingMyLocation();
 
 		this.locationWatchId = navigator.geolocation.watchPosition(
 			(pos) => {
@@ -258,14 +263,17 @@ class FindMyStore {
 					timestamp: pos.timestamp,
 					address: prev?.address ?? null,
 					name: profile.name || 'Me',
-					photoBase64: profile.photoBase64
+					photoBase64: profile.photoBase64,
+					approximate: false
 				};
 
 				if (shouldGeocode) {
 					this.geocodeMyLocation(lat, lon);
 				}
 			},
-			() => {},
+			() => {
+				this.fallbackToIpLocation(profile);
+			},
 			{ enableHighAccuracy: true }
 		);
 	}
@@ -287,6 +295,26 @@ class FindMyStore {
 			}
 		} catch {
 			// geocoding failed, address stays null
+		}
+	}
+
+	private async fallbackToIpLocation(profile: { name: string; photoBase64: string | null }) {
+		try {
+			const res = await fetch('https://ipwho.is/');
+			const data = await res.json();
+			if (!data.success || !data.latitude || !data.longitude) return;
+
+			this.myLocation = {
+				latitude: data.latitude,
+				longitude: data.longitude,
+				timestamp: Date.now(),
+				address: [data.city, data.region, data.country].filter(Boolean).join(', ') || null,
+				name: profile.name || 'Me',
+				photoBase64: profile.photoBase64,
+				approximate: true
+			};
+		} catch {
+			// IP geolocation failed too, myLocation stays null
 		}
 	}
 
