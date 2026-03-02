@@ -87,6 +87,7 @@ export class SyncEngine {
 		// Step 2: Background tasks — don't block UI
 		// These run concurrently and progressively update the UI
 		this.syncPinnedChats().catch(() => {});
+		this.syncUnreadCounts().catch(() => {});
 		this.fixBlankPreviews().catch(() => {});
 		this.resolveContacts().catch(() => {});
 		this.syncEligibility().catch(() => {});
@@ -138,6 +139,7 @@ export class SyncEngine {
 						const existing = await db.chats.get(dbChat.guid);
 						if (existing) {
 							dbChat.isPinned = existing.isPinned;
+							dbChat.unreadCount = existing.unreadCount;
 							if (!dbChat.lastMessageText && existing.lastMessageText) {
 								dbChat.lastMessageText = existing.lastMessageText;
 							}
@@ -158,8 +160,9 @@ export class SyncEngine {
 			this.syncing = false;
 		}
 
-		// Background: sync pinned state, fix blank previews, resolve contacts
+		// Background: sync pinned state, unread counts, fix blank previews, resolve contacts
 		this.syncPinnedChats().catch(() => {});
+		this.syncUnreadCounts().catch(() => {});
 		this.fixBlankPreviews().catch(() => {});
 		this.resolveContacts().catch(() => {});
 	}
@@ -519,6 +522,21 @@ export class SyncEngine {
 					if (chat.isPinned !== shouldBePinned) {
 						await db.chats.update(chat.guid, { isPinned: shouldBePinned });
 					}
+				}
+			});
+		} catch {}
+	}
+
+	private async syncUnreadCounts() {
+		try {
+			const res = await fetch('/api/unread-counts');
+			if (!res.ok) return;
+			const { data } = (await res.json()) as { data: Record<string, number> };
+			if (!data) return;
+
+			await db.transaction('rw', db.chats, async () => {
+				for (const [guid, count] of Object.entries(data)) {
+					await db.chats.update(guid, { unreadCount: count });
 				}
 			});
 		} catch {}
