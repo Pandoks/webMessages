@@ -15,6 +15,7 @@
 			address: string | null;
 			name: string;
 			photoBase64: string | null;
+			approximate: boolean;
 		} | null;
 		selectedId: string | null;
 		onSelect: (id: string) => void;
@@ -236,13 +237,24 @@
 				iconAnchor: [size / 2, size / 2]
 			});
 			const marker = L.marker([myLocation.latitude, myLocation.longitude], { icon });
-			marker.bindTooltip('Me', {
+			marker.bindTooltip(myLocation.approximate ? 'Me (Approximate)' : 'Me', {
 				direction: 'top',
 				offset: [0, -(size / 2 + 4)],
 				className: 'findmy-tooltip'
 			});
 			marker.on('click', () => onSelect('__me__'));
 			markersLayer.addLayer(marker);
+			if (myLocation.approximate) {
+				const circle = L.circle([myLocation.latitude, myLocation.longitude], {
+					radius: 15000,
+					color: '#007AFF',
+					fillColor: '#007AFF',
+					fillOpacity: 0.08,
+					weight: 1,
+					opacity: 0.3
+				});
+				markersLayer.addLayer(circle);
+			}
 			bounds.push([myLocation.latitude, myLocation.longitude]);
 		}
 
