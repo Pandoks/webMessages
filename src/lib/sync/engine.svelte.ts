@@ -1,5 +1,11 @@
 import { db } from '$lib/db/index.js';
-import { chatToDb, messageToDb, handleToDb, attachmentToDb, derivePreviewText } from '$lib/sync/transforms.js';
+import {
+	chatToDb,
+	messageToDb,
+	handleToDb,
+	attachmentToDb,
+	derivePreviewText
+} from '$lib/sync/transforms.js';
 import type { Chat, Message, Handle } from '$lib/types/index.js';
 import type { ApiResponse } from '$lib/types/index.js';
 import { SSEClient } from '$lib/sync/sse.js';
@@ -28,7 +34,6 @@ export class SyncEngine {
 		} else {
 			await this.initialSync();
 		}
-
 	}
 
 	stop() {
@@ -99,24 +104,20 @@ export class SyncEngine {
 			});
 
 			if (msgRes.data?.length) {
-				await db.transaction(
-					'rw',
-					[db.messages, db.attachments, db.handles],
-					async () => {
-						for (const msg of msgRes.data) {
-							await db.messages.put(messageToDb(msg));
+				await db.transaction('rw', [db.messages, db.attachments, db.handles], async () => {
+					for (const msg of msgRes.data) {
+						await db.messages.put(messageToDb(msg));
 
-							if (msg.handle) {
-								await this.upsertHandle(msg.handle);
-							}
-							if (msg.attachments) {
-								for (const att of msg.attachments) {
-									await db.attachments.put(attachmentToDb(att, msg.guid));
-								}
+						if (msg.handle) {
+							await this.upsertHandle(msg.handle);
+						}
+						if (msg.attachments) {
+							for (const att of msg.attachments) {
+								await db.attachments.put(attachmentToDb(att, msg.guid));
 							}
 						}
 					}
-				);
+				});
 			}
 
 			// Update edit/unsend eligibility for recent sent messages
@@ -177,10 +178,7 @@ export class SyncEngine {
 		if (existing) return existing;
 
 		// Check if messages already exist in IndexedDB (from a previous session)
-		const count = await db.messages
-			.where('chatGuid')
-			.equals(chatGuid)
-			.count();
+		const count = await db.messages.where('chatGuid').equals(chatGuid).count();
 
 		if (count > 0) {
 			this.syncedChatGuids.add(chatGuid);
@@ -415,7 +413,6 @@ export class SyncEngine {
 			// Yield to avoid blocking the main thread
 			await new Promise((r) => setTimeout(r, 0));
 		}
-
 	}
 
 	private async resolveContacts() {
@@ -454,8 +451,8 @@ export class SyncEngine {
 			this.contactsFullyResolved = true;
 
 			const existingAddresses = new Set(
-				((await db.handles.toCollection().primaryKeys()) as string[]).map(
-					(addr) => addr.replace(/[\s\-()]/g, '').toLowerCase()
+				((await db.handles.toCollection().primaryKeys()) as string[]).map((addr) =>
+					addr.replace(/[\s\-()]/g, '').toLowerCase()
 				)
 			);
 

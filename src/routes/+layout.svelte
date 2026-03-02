@@ -11,9 +11,7 @@
 
 	let { children } = $props();
 
-	let favicon = $derived(
-		page.url.pathname.startsWith('/findmy') ? faviconFindmy : faviconMessages
-	);
+	let favicon = $derived(page.url.pathname.startsWith('/findmy') ? faviconFindmy : faviconMessages);
 
 	setContext('syncEngine', syncEngine);
 
@@ -33,7 +31,9 @@
 </svelte:head>
 
 <div class="flex h-screen flex-col bg-white dark:bg-gray-900">
-	<header class="flex items-center justify-between border-b border-gray-200 px-4 py-2 dark:border-gray-700">
+	<header
+		class="flex items-center justify-between border-b border-gray-200 px-4 py-2 dark:border-gray-700"
+	>
 		<div class="flex items-center gap-2">
 			<ModeToggle />
 			{#if syncEngine.syncing}

@@ -150,7 +150,9 @@ class FindMyStore {
 				this.cachedPhotoMap = contacts.photos ?? {};
 			}
 
-			const transformed = raw.map((f) => this.transformFriend(f, this.cachedContactMap, this.cachedPhotoMap));
+			const transformed = raw.map((f) =>
+				this.transformFriend(f, this.cachedContactMap, this.cachedPhotoMap)
+			);
 			this.friends = this.mergeFriends(transformed);
 			// Reverse geocode friends with city-only addresses (non-blocking)
 			this.geocodeFriends();
@@ -192,10 +194,12 @@ class FindMyStore {
 		if (idx >= 0) {
 			const existing = this.friends[idx];
 			const coordsChanged =
-				existing.latitude !== transformed.latitude ||
-				existing.longitude !== transformed.longitude;
+				existing.latitude !== transformed.latitude || existing.longitude !== transformed.longitude;
 			const updated = [...this.friends];
-			updated[idx] = { ...transformed, address: coordsChanged ? transformed.address : existing.address };
+			updated[idx] = {
+				...transformed,
+				address: coordsChanged ? transformed.address : existing.address
+			};
 			this.friends = this.mergeFriends(updated);
 			if (coordsChanged) {
 				this.geocodeFriends();

@@ -53,7 +53,9 @@ describe('EventBroadcaster', () => {
 		const healthy: string[] = [];
 
 		broadcaster.addClient({
-			enqueue: () => { throw new Error('connection lost'); },
+			enqueue: () => {
+				throw new Error('connection lost');
+			},
 			close: () => {}
 		});
 		broadcaster.addClient({
@@ -73,7 +75,10 @@ describe('EventBroadcaster', () => {
 		const received: string[] = [];
 
 		broadcaster.addClient({ enqueue: (d: string) => received.push(d), close: () => {} });
-		broadcaster.broadcast({ type: 'typing-indicator', data: { chatGuid: 'chat-1', display: true } });
+		broadcaster.broadcast({
+			type: 'typing-indicator',
+			data: { chatGuid: 'chat-1', display: true }
+		});
 
 		const sse = received[0];
 		expect(sse).toMatch(/^event: typing-indicator\n/);
@@ -81,7 +86,7 @@ describe('EventBroadcaster', () => {
 		expect(sse).toMatch(/\n\n$/);
 
 		const lines = sse.split('\n');
-		const dataLine = lines.find(l => l.startsWith('data: '));
+		const dataLine = lines.find((l) => l.startsWith('data: '));
 		expect(dataLine).toBeDefined();
 		const parsed = JSON.parse(dataLine!.slice('data: '.length));
 		expect(parsed).toEqual({ chatGuid: 'chat-1', display: true });

@@ -227,9 +227,17 @@
 	async function handleScheduleSend(text: string, scheduledAt: number) {
 		// Optimistic: add a temporary entry immediately
 		const tempGuid = `temp-${Date.now()}`;
-		scheduledMessages = [...scheduledMessages, {
-			guid: tempGuid, chatGuid, text, scheduledAt, scheduleType: 2, scheduleState: 1
-		}];
+		scheduledMessages = [
+			...scheduledMessages,
+			{
+				guid: tempGuid,
+				chatGuid,
+				text,
+				scheduledAt,
+				scheduleType: 2,
+				scheduleState: 1
+			}
+		];
 
 		pendingMutations++;
 		try {
@@ -248,7 +256,11 @@
 		// Optimistic: update in place immediately
 		scheduledMessages = scheduledMessages.map((sm) =>
 			sm.guid === guid
-				? { ...sm, ...(message !== undefined && { text: message }), ...(scheduledAt !== undefined && { scheduledAt }) }
+				? {
+						...sm,
+						...(message !== undefined && { text: message }),
+						...(scheduledAt !== undefined && { scheduledAt })
+					}
 				: sm
 		);
 
@@ -261,7 +273,11 @@
 			method: 'PUT',
 			headers: { 'Content-Type': 'application/json' },
 			body: JSON.stringify(body)
-		}).then(() => fetchScheduledMessages()).finally(() => { pendingMutations--; });
+		})
+			.then(() => fetchScheduledMessages())
+			.finally(() => {
+				pendingMutations--;
+			});
 	}
 
 	async function handleDeleteScheduled(guid: string) {
@@ -272,7 +288,11 @@
 		fetch(
 			`/api/scheduled-messages/${encodeURIComponent(guid)}?chatGuid=${encodeURIComponent(chatGuid)}`,
 			{ method: 'DELETE' }
-		).then(() => fetchScheduledMessages()).finally(() => { pendingMutations--; });
+		)
+			.then(() => fetchScheduledMessages())
+			.finally(() => {
+				pendingMutations--;
+			});
 	}
 
 	const handleMap = $derived(new Map(handles.map((h) => [h.address, h.displayName])));
@@ -284,12 +304,19 @@
 
 	const isGroup = $derived(chat?.style === 43);
 	const is1to1 = $derived(chat?.style === 45);
-	const participantAddress = $derived(is1to1 && chat?.participants?.length ? chat.participants[0] : null);
+	const participantAddress = $derived(
+		is1to1 && chat?.participants?.length ? chat.participants[0] : null
+	);
 
 	const friendHasLocation = $derived.by(() => {
 		if (!participantAddress) return false;
 		const friend = findMyStore.friends.find((f) => f.handle === participantAddress);
-		return friend !== null && friend !== undefined && friend.latitude !== null && friend.longitude !== null;
+		return (
+			friend !== null &&
+			friend !== undefined &&
+			friend.latitude !== null &&
+			friend.longitude !== null
+		);
 	});
 
 	// Fetch Find My friends so we know whether to show the location button
@@ -487,7 +514,7 @@
 					associatedMessageGuid: null,
 					associatedMessageType: 0,
 					associatedMessageEmoji: null,
-					threadOriginatorGuid: (i === 0 && replyToGuid) ? replyToGuid : null,
+					threadOriginatorGuid: i === 0 && replyToGuid ? replyToGuid : null,
 					attachmentGuids: data?.attachments?.map((a: { guid: string }) => a.guid) ?? [],
 					error: 0,
 					expressiveSendStyleId: null,
@@ -571,8 +598,12 @@
 
 	function reactionTypeForEmoji(reaction: string): number {
 		const map: Record<string, number> = {
-			love: 2000, like: 2001, dislike: 2002,
-			laugh: 2003, emphasize: 2004, question: 2005
+			love: 2000,
+			like: 2001,
+			dislike: 2002,
+			laugh: 2003,
+			emphasize: 2004,
+			question: 2005
 		};
 		return map[reaction] ?? 2000;
 	}
@@ -629,9 +660,7 @@
 
 <div class="flex h-full flex-col">
 	<!-- Header -->
-	<header
-		class="flex items-center border-b border-gray-200 px-4 py-3 dark:border-gray-700"
-	>
+	<header class="flex items-center border-b border-gray-200 px-4 py-3 dark:border-gray-700">
 		<h2 class="truncate text-base font-semibold dark:text-white">
 			{displayName}
 		</h2>
@@ -651,8 +680,18 @@
 					title="Show location"
 				>
 					<svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-						<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
-						<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
+						<path
+							stroke-linecap="round"
+							stroke-linejoin="round"
+							stroke-width="2"
+							d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"
+						/>
+						<path
+							stroke-linecap="round"
+							stroke-linejoin="round"
+							stroke-width="2"
+							d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"
+						/>
 					</svg>
 				</button>
 			{/if}
@@ -698,8 +737,19 @@
 					<button
 						class="flex items-center gap-1.5 rounded-full border border-blue-300 px-3 py-1 text-xs font-medium text-blue-500 transition-colors hover:bg-blue-50 dark:border-blue-700 dark:text-blue-400 dark:hover:bg-blue-900/20"
 					>
-						<svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-							<path stroke-linecap="round" stroke-linejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+						<svg
+							xmlns="http://www.w3.org/2000/svg"
+							class="h-3.5 w-3.5"
+							fill="none"
+							viewBox="0 0 24 24"
+							stroke="currentColor"
+							stroke-width="2"
+						>
+							<path
+								stroke-linecap="round"
+								stroke-linejoin="round"
+								d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"
+							/>
 						</svg>
 						Scheduled Messages ({scheduledMessages.length})
 						<svg
@@ -754,7 +804,8 @@
 							onEdit={handleEdit}
 							onUnsend={handleUnsend}
 							replyToText={null}
-							onSaveScheduleEdit={(guid, message, scheduledAt) => handleEditScheduled(guid, message, scheduledAt)}
+							onSaveScheduleEdit={(guid, message, scheduledAt) =>
+								handleEditScheduled(guid, message, scheduledAt)}
 							onCancelSchedule={(guid) => handleDeleteScheduled(guid)}
 						/>
 					{/each}
@@ -765,9 +816,15 @@
 				<div class="mb-1 flex justify-start">
 					<div class="rounded-2xl bg-gray-200 px-3 py-2 dark:bg-gray-700">
 						<div class="flex items-center gap-1">
-							<span class="inline-block h-2 w-2 animate-bounce rounded-full bg-gray-400 [animation-delay:0ms]"></span>
-							<span class="inline-block h-2 w-2 animate-bounce rounded-full bg-gray-400 [animation-delay:150ms]"></span>
-							<span class="inline-block h-2 w-2 animate-bounce rounded-full bg-gray-400 [animation-delay:300ms]"></span>
+							<span
+								class="inline-block h-2 w-2 animate-bounce rounded-full bg-gray-400 [animation-delay:0ms]"
+							></span>
+							<span
+								class="inline-block h-2 w-2 animate-bounce rounded-full bg-gray-400 [animation-delay:150ms]"
+							></span>
+							<span
+								class="inline-block h-2 w-2 animate-bounce rounded-full bg-gray-400 [animation-delay:300ms]"
+							></span>
 						</div>
 					</div>
 				</div>

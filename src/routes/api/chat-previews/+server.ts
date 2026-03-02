@@ -59,9 +59,7 @@ export const GET: RequestHandler = async () => {
 		const result: Record<string, string> = {};
 
 		for (const row of rows) {
-			result[row.chat_guid] = row.is_from_me
-				? 'You unsent a message'
-				: 'This message was unsent';
+			result[row.chat_guid] = row.is_from_me ? 'You unsent a message' : 'This message was unsent';
 		}
 
 		return json({ data: result });

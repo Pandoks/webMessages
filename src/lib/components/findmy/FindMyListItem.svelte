@@ -10,11 +10,26 @@
 		emoji?: string | null;
 	}
 
-	let { id, name, subtitle, distance = null, isSelected, onSelect, avatarUrl = null, emoji = null }: Props = $props();
+	let {
+		id,
+		name,
+		subtitle,
+		distance = null,
+		isSelected,
+		onSelect,
+		avatarUrl = null,
+		emoji = null
+	}: Props = $props();
 
 	const avatarColors = [
-		'#3b82f6', '#22c55e', '#f97316', '#a855f7',
-		'#ec4899', '#14b8a6', '#ef4444', '#6366f1'
+		'#3b82f6',
+		'#22c55e',
+		'#f97316',
+		'#a855f7',
+		'#ec4899',
+		'#14b8a6',
+		'#ef4444',
+		'#6366f1'
 	];
 
 	function getColor(n: string): string {
@@ -24,15 +39,25 @@
 	}
 
 	function getInitials(n: string): string {
-		return n.replace(/[^\p{L}\p{N}\s]/gu, '').trim().split(/\s+/).slice(0, 2)
-			.map((w) => w[0]?.toUpperCase() ?? '').join('');
+		return n
+			.replace(/[^\p{L}\p{N}\s]/gu, '')
+			.trim()
+			.split(/\s+/)
+			.slice(0, 2)
+			.map((w) => w[0]?.toUpperCase() ?? '')
+			.join('');
 	}
 </script>
 
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <div
 	onclick={() => onSelect(id)}
-	onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onSelect(id); } }}
+	onkeydown={(e) => {
+		if (e.key === 'Enter' || e.key === ' ') {
+			e.preventDefault();
+			onSelect(id);
+		}
+	}}
 	role="button"
 	tabindex="0"
 	class="group relative flex w-full cursor-pointer items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-gray-50 dark:hover:bg-gray-800
@@ -42,7 +67,9 @@
 	{#if avatarUrl}
 		<img src={avatarUrl} alt={name} class="h-9 w-9 shrink-0 rounded-full object-cover" />
 	{:else if emoji}
-		<div class="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-gray-100 text-lg dark:bg-gray-800">
+		<div
+			class="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-gray-100 text-lg dark:bg-gray-800"
+		>
 			{emoji}
 		</div>
 	{:else}

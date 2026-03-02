@@ -1,7 +1,12 @@
 <script lang="ts">
 	import type { FindMyDevice, FindMyFriend } from '$lib/types/index.js';
 	import { findMyStore } from '$lib/stores/findmy.svelte.js';
-	import { formatRelativeTime, extractCityState, haversineDistance, formatDistance } from '$lib/utils/format.js';
+	import {
+		formatRelativeTime,
+		extractCityState,
+		haversineDistance,
+		formatDistance
+	} from '$lib/utils/format.js';
 	import FindMyListItem from './FindMyListItem.svelte';
 
 	type Tab = 'people' | 'devices';
@@ -61,17 +66,13 @@
 
 	const filteredFriends = $derived.by(() => {
 		const q = search.toLowerCase();
-		const filtered = q
-			? friends.filter((f) => f.displayName.toLowerCase().includes(q))
-			: friends;
+		const filtered = q ? friends.filter((f) => f.displayName.toLowerCase().includes(q)) : friends;
 		return [...filtered].sort((a, b) => a.displayName.localeCompare(b.displayName));
 	});
 
 	const filteredDevices = $derived.by(() => {
 		const q = search.toLowerCase();
-		const filtered = q
-			? devices.filter((d) => d.name.toLowerCase().includes(q))
-			: devices;
+		const filtered = q ? devices.filter((d) => d.name.toLowerCase().includes(q)) : devices;
 		return [...filtered].sort((a, b) => a.name.localeCompare(b.name));
 	});
 
@@ -106,7 +107,11 @@
 					stroke="currentColor"
 					stroke-width="1.5"
 				>
-					<path stroke-linecap="round" stroke-linejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182M20.016 4.356v4.992" />
+					<path
+						stroke-linecap="round"
+						stroke-linejoin="round"
+						d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182M20.016 4.356v4.992"
+					/>
 				</svg>
 			</button>
 		</div>
@@ -141,7 +146,9 @@
 					name={myLocation.name}
 					subtitle={buildSubtitle(myLocation.address, myLocation.timestamp)}
 					isSelected={selectedId === '__me__'}
-					avatarUrl={myLocation.photoBase64 ? `data:image/jpeg;base64,${myLocation.photoBase64}` : null}
+					avatarUrl={myLocation.photoBase64
+						? `data:image/jpeg;base64,${myLocation.photoBase64}`
+						: null}
 					{onSelect}
 				/>
 			{/if}

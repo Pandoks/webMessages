@@ -77,14 +77,19 @@ export class ImessageClient {
 	}
 
 	getChat(guid: string): Promise<ApiResponse<Chat>> {
-		return this.get<Chat>(
-			`/api/v1/chat/${encodeURIComponent(guid)}?with=participants,lastMessage`
-		);
+		return this.get<Chat>(`/api/v1/chat/${encodeURIComponent(guid)}?with=participants,lastMessage`);
 	}
 
 	getChatMessages(
 		guid: string,
-		params?: { limit?: number; offset?: number; sort?: 'ASC' | 'DESC'; after?: string; before?: string; with?: string[] }
+		params?: {
+			limit?: number;
+			offset?: number;
+			sort?: 'ASC' | 'DESC';
+			after?: string;
+			before?: string;
+			with?: string[];
+		}
 	): Promise<ApiResponse<Message[]>> {
 		const searchParams = new URLSearchParams();
 		if (params) {

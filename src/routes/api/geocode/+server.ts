@@ -17,7 +17,10 @@ export const GET: RequestHandler = async ({ url }) => {
 	}
 
 	// Split by pipe for batch requests: "lat,lon|lat,lon|..."
-	const pairs = coords.split('|').map((c) => c.trim()).filter(Boolean);
+	const pairs = coords
+		.split('|')
+		.map((c) => c.trim())
+		.filter(Boolean);
 	const results: Record<string, string | null> = {};
 	const uncached: string[] = [];
 
