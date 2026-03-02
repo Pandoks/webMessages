@@ -51,21 +51,6 @@ export function extractCityState(address: string | null): string | null {
 	return `${city}, ${abbrev}`;
 }
 
-/**
- * Extract the most specific address component for compact display.
- * Returns street ("123 Main St") if available, otherwise falls back to city/state.
- */
-export function extractStreetAddress(address: string | null): string | null {
-	if (!address) return null;
-	const parts = address.split(',').map((p) => p.trim());
-	// If the first part contains a digit, it's a street address
-	if (parts.length >= 3 && /\d/.test(parts[0])) {
-		return parts[0];
-	}
-	// No street-level data, fall back to city/state
-	return extractCityState(address);
-}
-
 export function haversineDistance(
 	lat1: number, lon1: number, lat2: number, lon2: number
 ): number {

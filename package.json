@@ -8,7 +8,7 @@
 		"build": "vite build",
 		"preview": "vite preview",
 		"prepare": "svelte-kit sync || echo ''",
-		"build:swift": "swiftc src/lib/server/imcore-bridge.swift -o src/lib/server/imcore-bridge -framework Foundation -lsqlite3 && codesign --sign 'Apple Development: Jason Kwok (23YN3Z3K8M)' --entitlements src/lib/server/imcore-bridge.entitlements --force src/lib/server/imcore-bridge && swiftc src/lib/server/pinned-chats.swift -o src/lib/server/pinned-chats -framework Foundation && swiftc src/lib/server/pin-chat.swift -o src/lib/server/pin-chat -framework Foundation && swiftc scripts/reverse-geocode.swift -o scripts/reverse-geocode -framework CoreLocation",
+		"build:swift": "swiftc src/lib/server/imcore-bridge.swift -o src/lib/server/imcore-bridge -framework Foundation -lsqlite3 && codesign --sign - --entitlements src/lib/server/imcore-bridge.entitlements --force src/lib/server/imcore-bridge && swiftc src/lib/server/pinned-chats.swift -o src/lib/server/pinned-chats -framework Foundation && swiftc src/lib/server/reverse-geocode.swift -o src/lib/server/reverse-geocode -framework CoreLocation",
 		"check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
 		"check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch",
 		"lint": "prettier --check .",

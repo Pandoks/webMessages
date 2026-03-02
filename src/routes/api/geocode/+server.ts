@@ -2,10 +2,10 @@ import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types.js';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { resolve } from 'node:path';
+import { REVERSE_GEOCODE } from '$lib/server/env.js';
 
 const execFileAsync = promisify(execFile);
-const binaryPath = resolve('scripts/reverse-geocode');
+const binaryPath = REVERSE_GEOCODE;
 
 // Cache geocode results in memory (coordinates rarely change)
 const cache = new Map<string, string>();

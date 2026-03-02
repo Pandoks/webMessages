@@ -1,0 +1,81 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Compile Swift binaries (ad-hoc)
+        run: |
+          mkdir -p dist/bin
+
+          swiftc src/lib/server/imcore-bridge.swift \
+            -o dist/bin/imcore-bridge \
+            -framework Foundation -lsqlite3
+          codesign --sign - \
+            --entitlements src/lib/server/imcore-bridge.entitlements \
+            --force dist/bin/imcore-bridge
+
+          swiftc src/lib/server/pinned-chats.swift \
+            -o dist/bin/pinned-chats \
+            -framework Foundation
+
+          swiftc src/lib/server/reverse-geocode.swift \
+            -o dist/bin/reverse-geocode \
+            -framework CoreLocation
+
+      - name: Download imessage-rs
+        run: |
+          ARCH=$(uname -m)
+          case "$ARCH" in
+            arm64) TARGET="aarch64-apple-darwin" ;;
+            x86_64) TARGET="x86_64-apple-darwin" ;;
+          esac
+
+          TAG=$(curl -sf https://api.github.com/repos/jesec/imessage-rs/releases/latest | python3 -c "import sys,json; print(json.load(sys.stdin)['tag_name'])")
+          echo "imessage-rs version: $TAG"
+
+          URL="https://github.com/jesec/imessage-rs/releases/download/${TAG}/imessage-rs-${TARGET}.tar.gz"
+          if curl -sfL "$URL" -o /tmp/imessage-rs.tar.gz; then
+            tar -xzf /tmp/imessage-rs.tar.gz -C dist/bin/
+          else
+            echo "Pre-built binary not found, building from source..."
+            curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+            source "$HOME/.cargo/env"
+            cargo install imessage-rs --root /tmp/imessage-rs-build
+            cp /tmp/imessage-rs-build/bin/imessage-rs dist/bin/
+          fi
+
+      - name: Build SvelteKit
+        run: IMESSAGE_RS_PASSWORD=build-placeholder pnpm build
+
+      - name: Assemble release archive
+        env:
+          RELEASE_VERSION: ${{ github.ref_name }}
+        run: bash scripts/build-release.sh --version "$RELEASE_VERSION" --skip-compile
+
+      - name: Upload release
+        uses: softprops/action-gh-release@v2
+        env:
+          RELEASE_VERSION: ${{ github.ref_name }}
+        with:
+          files: dist/webmessages-${{ github.ref_name }}
+          generate_release_notes: true
