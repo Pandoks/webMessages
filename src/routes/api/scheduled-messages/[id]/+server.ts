@@ -1,11 +1,11 @@
 import { json } from '@sveltejs/kit';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { resolve } from 'node:path';
 import type { RequestHandler } from './$types.js';
+import { IMCORE_BRIDGE } from '$lib/server/env.js';
 
 const execFileAsync = promisify(execFile);
-const BRIDGE = resolve('src/lib/server/imcore-bridge');
+const BRIDGE = IMCORE_BRIDGE;
 
 async function runBridge(args: string[], timeout = 15_000): Promise<unknown> {
 	const { stdout } = await execFileAsync(BRIDGE, args, { timeout });

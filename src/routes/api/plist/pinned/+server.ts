@@ -1,12 +1,11 @@
 import { json } from '@sveltejs/kit';
 import { execFileSync } from 'child_process';
 import { existsSync } from 'fs';
-import { join } from 'path';
 import type { RequestHandler } from './$types.js';
+import { PINNED_CHATS } from '$lib/server/env.js';
 
 export const GET: RequestHandler = async () => {
-	// Use compiled Swift binary that reads pinned conversations from IMCore's local store
-	const binaryPath = join(process.cwd(), 'src', 'lib', 'server', 'pinned-chats');
+	const binaryPath = PINNED_CHATS;
 
 	if (!existsSync(binaryPath)) {
 		return json({ status: 200, data: [] });

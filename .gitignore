@@ -7,6 +7,12 @@ node_modules
 .wrangler
 /.svelte-kit
 /build
+/dist
+
+# Compiled Swift binaries
+src/lib/server/imcore-bridge
+src/lib/server/pinned-chats
+src/lib/server/reverse-geocode
 
 # OS
 .DS_Store
