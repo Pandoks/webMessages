@@ -59,8 +59,14 @@
 
 	// --- Marker helpers (adapted from ChatAvatar.svelte for hex colors) ---
 	const markerColors = [
-		'#3b82f6', '#22c55e', '#f97316', '#a855f7',
-		'#ec4899', '#14b8a6', '#ef4444', '#6366f1'
+		'#3b82f6',
+		'#22c55e',
+		'#f97316',
+		'#a855f7',
+		'#ec4899',
+		'#14b8a6',
+		'#ef4444',
+		'#6366f1'
 	];
 
 	function getMarkerColor(name: string): string {
@@ -368,7 +374,7 @@
 
 <div class="relative h-full w-full">
 	<div bind:this={mapContainer} class="h-full w-full"></div>
-	<div class="absolute right-3 top-3 z-[400]">
+	<div class="absolute top-3 right-3 z-[400]">
 		<MapViewToggle currentView={mapView} onViewChange={handleViewChange} />
 	</div>
 	<button
@@ -377,8 +383,19 @@
 		aria-label="Fit all locations"
 		title="Fit all locations"
 	>
-		<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 text-gray-700 dark:text-gray-200" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-			<path stroke-linecap="round" stroke-linejoin="round" d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5v-4m0 4h-4m4 0l-5-5" />
+		<svg
+			xmlns="http://www.w3.org/2000/svg"
+			class="h-4 w-4 text-gray-700 dark:text-gray-200"
+			fill="none"
+			viewBox="0 0 24 24"
+			stroke="currentColor"
+			stroke-width="2"
+		>
+			<path
+				stroke-linecap="round"
+				stroke-linejoin="round"
+				d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5v-4m0 4h-4m4 0l-5-5"
+			/>
 		</svg>
 	</button>
 </div>

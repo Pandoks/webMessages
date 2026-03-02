@@ -63,7 +63,15 @@ describe('transforms', () => {
 			displayName: null,
 			style: 45,
 			isArchived: false,
-			participants: [{ address: '+1234567890', service: 'iMessage', country: 'us', originalROWID: 1, uncanonicalizedId: null }],
+			participants: [
+				{
+					address: '+1234567890',
+					service: 'iMessage',
+					country: 'us',
+					originalROWID: 1,
+					uncanonicalizedId: null
+				}
+			],
 			lastMessage: { dateCreated: 1700000000000, text: 'Hello' } as Message
 		} as Chat;
 
@@ -83,7 +91,15 @@ describe('transforms', () => {
 			displayName: 'Test Group',
 			style: 43,
 			isArchived: false,
-			participants: [{ address: '+9876543210', service: 'iMessage', country: 'us', originalROWID: 2, uncanonicalizedId: null }]
+			participants: [
+				{
+					address: '+9876543210',
+					service: 'iMessage',
+					country: 'us',
+					originalROWID: 2,
+					uncanonicalizedId: null
+				}
+			]
 		} as Chat;
 
 		const db = chatToDb(chat);
@@ -111,7 +127,13 @@ describe('transforms', () => {
 			guid: 'msg-1',
 			text: 'Hello',
 			handleId: 1,
-			handle: { address: '+1234567890', service: 'iMessage', country: 'us', originalROWID: 1, uncanonicalizedId: null },
+			handle: {
+				address: '+1234567890',
+				service: 'iMessage',
+				country: 'us',
+				originalROWID: 1,
+				uncanonicalizedId: null
+			},
 			isFromMe: false,
 			dateCreated: 1700000000000,
 			dateDelivered: 1700000000500,
@@ -196,7 +218,13 @@ describe('transforms', () => {
 	it('transforms reaction message', () => {
 		const msg = testMessage({
 			guid: 'msg-reaction',
-			handle: { address: '+1111111111', service: 'iMessage', country: 'us', originalROWID: 3, uncanonicalizedId: null },
+			handle: {
+				address: '+1111111111',
+				service: 'iMessage',
+				country: 'us',
+				originalROWID: 3,
+				uncanonicalizedId: null
+			},
 			chats: [{ guid: 'iMessage;-;+1234567890' } as Chat],
 			text: '\ufffc Loved "Hello"',
 			handleId: 3,
@@ -213,7 +241,13 @@ describe('transforms', () => {
 	});
 
 	it('transforms Handle to DbHandle', () => {
-		const handle: Handle = { originalROWID: 1, address: '+1234567890', service: 'iMessage', country: 'us', uncanonicalizedId: null };
+		const handle: Handle = {
+			originalROWID: 1,
+			address: '+1234567890',
+			service: 'iMessage',
+			country: 'us',
+			uncanonicalizedId: null
+		};
 		const db = handleToDb(handle);
 		expect(db.address).toBe('+1234567890');
 		expect(db.displayName).toBeNull();
@@ -222,9 +256,21 @@ describe('transforms', () => {
 
 	it('transforms Attachment to DbAttachment', () => {
 		const att = {
-			guid: 'att-1', originalROWID: 1, mimeType: 'image/jpeg', transferName: 'photo.jpg',
-			totalBytes: 12345, width: 1080, height: 1920, hasLivePhoto: false, isSticker: false,
-			uti: null, transferState: 5, isOutgoing: false, hideAttachment: false, originalGuid: null, metadata: null
+			guid: 'att-1',
+			originalROWID: 1,
+			mimeType: 'image/jpeg',
+			transferName: 'photo.jpg',
+			totalBytes: 12345,
+			width: 1080,
+			height: 1920,
+			hasLivePhoto: false,
+			isSticker: false,
+			uti: null,
+			transferState: 5,
+			isOutgoing: false,
+			hideAttachment: false,
+			originalGuid: null,
+			metadata: null
 		} as Attachment;
 		const db = attachmentToDb(att, 'msg-1');
 		expect(db.guid).toBe('att-1');
@@ -235,9 +281,21 @@ describe('transforms', () => {
 
 	it('transforms Attachment with hasLivePhoto true', () => {
 		const att = {
-			guid: 'att-live', originalROWID: 2, mimeType: 'image/heic', transferName: 'live.heic',
-			totalBytes: 54321, width: 3024, height: 4032, hasLivePhoto: true, isSticker: false,
-			uti: 'public.heic', transferState: 5, isOutgoing: false, hideAttachment: false, originalGuid: null, metadata: null
+			guid: 'att-live',
+			originalROWID: 2,
+			mimeType: 'image/heic',
+			transferName: 'live.heic',
+			totalBytes: 54321,
+			width: 3024,
+			height: 4032,
+			hasLivePhoto: true,
+			isSticker: false,
+			uti: 'public.heic',
+			transferState: 5,
+			isOutgoing: false,
+			hideAttachment: false,
+			originalGuid: null,
+			metadata: null
 		} as Attachment;
 		const db = attachmentToDb(att, 'msg-live');
 		expect(db.hasLivePhoto).toBe(true);

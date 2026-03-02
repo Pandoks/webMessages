@@ -65,9 +65,7 @@ describe('getChatDisplayName', () => {
 	});
 
 	it('falls back to formatted phone number when handle has no display name', () => {
-		const handles = new Map<string, string | null>([
-			['+11234567890', null]
-		]);
+		const handles = new Map<string, string | null>([['+11234567890', null]]);
 		const result = getChatDisplayName(null, ['+11234567890'], handles);
 		expect(result).toBe('(123) 456-7890');
 	});
@@ -79,9 +77,7 @@ describe('getChatDisplayName', () => {
 	});
 
 	it('mixes known and unknown participants', () => {
-		const handles = new Map<string, string | null>([
-			['+11234567890', 'Alice']
-		]);
+		const handles = new Map<string, string | null>([['+11234567890', 'Alice']]);
 		const result = getChatDisplayName(null, ['+11234567890', '+442012345678'], handles);
 		expect(result).toBe('Alice, +442012345678');
 	});

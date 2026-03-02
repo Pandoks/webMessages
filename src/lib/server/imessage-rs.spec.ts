@@ -24,9 +24,11 @@ describe('ImessageClient', () => {
 	});
 
 	it('fetches with correct headers', async () => {
-		const mockFetch = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
-			new Response(JSON.stringify({ status: 200, message: 'Success', data: 'pong' }))
-		);
+		const mockFetch = vi
+			.spyOn(globalThis, 'fetch')
+			.mockResolvedValue(
+				new Response(JSON.stringify({ status: 200, message: 'Success', data: 'pong' }))
+			);
 
 		await client.get('/api/v1/ping');
 
@@ -55,11 +57,17 @@ describe('ImessageClient', () => {
 	});
 
 	it('POST sends correct body and Content-Type', async () => {
-		const mockFetch = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
-			new Response(JSON.stringify({ status: 200, message: 'Success', data: {} }))
-		);
+		const mockFetch = vi
+			.spyOn(globalThis, 'fetch')
+			.mockResolvedValue(
+				new Response(JSON.stringify({ status: 200, message: 'Success', data: {} }))
+			);
 
-		const body = { chatGuid: 'iMessage;-;+1234567890', message: 'Hello world', method: 'private-api' };
+		const body = {
+			chatGuid: 'iMessage;-;+1234567890',
+			message: 'Hello world',
+			method: 'private-api'
+		};
 		await client.post('/api/v1/message/text', body);
 
 		expect(mockFetch).toHaveBeenCalledWith(
@@ -73,9 +81,11 @@ describe('ImessageClient', () => {
 	});
 
 	it('POST without body sends undefined body', async () => {
-		const mockFetch = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
-			new Response(JSON.stringify({ status: 200, message: 'Success', data: null }))
-		);
+		const mockFetch = vi
+			.spyOn(globalThis, 'fetch')
+			.mockResolvedValue(
+				new Response(JSON.stringify({ status: 200, message: 'Success', data: null }))
+			);
 
 		await client.post('/api/v1/chat/some-chat/read');
 
@@ -90,9 +100,7 @@ describe('ImessageClient', () => {
 
 	it('returns parsed JSON response from get', async () => {
 		const responseData = { status: 200, message: 'Success', data: 'pong' };
-		vi.spyOn(globalThis, 'fetch').mockResolvedValue(
-			new Response(JSON.stringify(responseData))
-		);
+		vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify(responseData)));
 
 		const result = await client.get('/api/v1/ping');
 		expect(result).toEqual(responseData);

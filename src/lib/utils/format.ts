@@ -24,17 +24,57 @@ export function formatPhoneNumber(address: string): string {
 }
 
 const STATE_ABBREVS: Record<string, string> = {
-	alabama: 'AL', alaska: 'AK', arizona: 'AZ', arkansas: 'AR', california: 'CA',
-	colorado: 'CO', connecticut: 'CT', delaware: 'DE', florida: 'FL', georgia: 'GA',
-	hawaii: 'HI', idaho: 'ID', illinois: 'IL', indiana: 'IN', iowa: 'IA',
-	kansas: 'KS', kentucky: 'KY', louisiana: 'LA', maine: 'ME', maryland: 'MD',
-	massachusetts: 'MA', michigan: 'MI', minnesota: 'MN', mississippi: 'MS', missouri: 'MO',
-	montana: 'MT', nebraska: 'NE', nevada: 'NV', 'new hampshire': 'NH', 'new jersey': 'NJ',
-	'new mexico': 'NM', 'new york': 'NY', 'north carolina': 'NC', 'north dakota': 'ND',
-	ohio: 'OH', oklahoma: 'OK', oregon: 'OR', pennsylvania: 'PA', 'rhode island': 'RI',
-	'south carolina': 'SC', 'south dakota': 'SD', tennessee: 'TN', texas: 'TX', utah: 'UT',
-	vermont: 'VT', virginia: 'VA', washington: 'WA', 'west virginia': 'WV',
-	wisconsin: 'WI', wyoming: 'WY', 'district of columbia': 'DC'
+	alabama: 'AL',
+	alaska: 'AK',
+	arizona: 'AZ',
+	arkansas: 'AR',
+	california: 'CA',
+	colorado: 'CO',
+	connecticut: 'CT',
+	delaware: 'DE',
+	florida: 'FL',
+	georgia: 'GA',
+	hawaii: 'HI',
+	idaho: 'ID',
+	illinois: 'IL',
+	indiana: 'IN',
+	iowa: 'IA',
+	kansas: 'KS',
+	kentucky: 'KY',
+	louisiana: 'LA',
+	maine: 'ME',
+	maryland: 'MD',
+	massachusetts: 'MA',
+	michigan: 'MI',
+	minnesota: 'MN',
+	mississippi: 'MS',
+	missouri: 'MO',
+	montana: 'MT',
+	nebraska: 'NE',
+	nevada: 'NV',
+	'new hampshire': 'NH',
+	'new jersey': 'NJ',
+	'new mexico': 'NM',
+	'new york': 'NY',
+	'north carolina': 'NC',
+	'north dakota': 'ND',
+	ohio: 'OH',
+	oklahoma: 'OK',
+	oregon: 'OR',
+	pennsylvania: 'PA',
+	'rhode island': 'RI',
+	'south carolina': 'SC',
+	'south dakota': 'SD',
+	tennessee: 'TN',
+	texas: 'TX',
+	utah: 'UT',
+	vermont: 'VT',
+	virginia: 'VA',
+	washington: 'WA',
+	'west virginia': 'WV',
+	wisconsin: 'WI',
+	wyoming: 'WY',
+	'district of columbia': 'DC'
 };
 
 export function extractCityState(address: string | null): string | null {
@@ -51,17 +91,13 @@ export function extractCityState(address: string | null): string | null {
 	return `${city}, ${abbrev}`;
 }
 
-export function haversineDistance(
-	lat1: number, lon1: number, lat2: number, lon2: number
-): number {
+export function haversineDistance(lat1: number, lon1: number, lat2: number, lon2: number): number {
 	const R = 3958.8; // Earth radius in miles
 	const dLat = ((lat2 - lat1) * Math.PI) / 180;
 	const dLon = ((lon2 - lon1) * Math.PI) / 180;
 	const a =
 		Math.sin(dLat / 2) ** 2 +
-		Math.cos((lat1 * Math.PI) / 180) *
-			Math.cos((lat2 * Math.PI) / 180) *
-			Math.sin(dLon / 2) ** 2;
+		Math.cos((lat1 * Math.PI) / 180) * Math.cos((lat2 * Math.PI) / 180) * Math.sin(dLon / 2) ** 2;
 	return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
@@ -78,7 +114,5 @@ export function getChatDisplayName(
 ): string {
 	if (displayName) return displayName;
 	if (participants.length === 0) return 'Unknown';
-	return participants
-		.map((addr) => handles.get(addr) || formatPhoneNumber(addr))
-		.join(', ');
+	return participants.map((addr) => handles.get(addr) || formatPhoneNumber(addr)).join(', ');
 }

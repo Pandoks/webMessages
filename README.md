@@ -5,6 +5,7 @@ A native macOS web client for **iMessage** and **Find My**, powered by [imessage
 ## Features
 
 **iMessage**
+
 - Send and receive texts, reactions (tapbacks), replies, edits, and unsends
 - Attachments — send images, videos, and files via drag-and-drop or paste
 - Scheduled messages — create, edit, and cancel via IMCore private API
@@ -16,12 +17,14 @@ A native macOS web client for **iMessage** and **Find My**, powered by [imessage
 - Edit/unsend eligibility — 15-minute edit window, 2-minute unsend window, with countdown timers
 
 **Find My**
+
 - Device and friend locations on an interactive map (street, satellite, hybrid views)
 - Reverse geocoding — coordinates resolved to street addresses
 - Distance calculations from your current location
 - Real-time location updates via webhooks
 
 **Architecture**
+
 - Local-first — IndexedDB (Dexie.js) mirrors all data for instant UI and offline reads
 - Real-time — Server-Sent Events push new messages, typing indicators, and location updates
 - Private — access restricted to localhost and Tailscale IPs only, no login needed
@@ -74,11 +77,11 @@ A native macOS web client for **iMessage** and **Find My**, powered by [imessage
 
 **Three Swift binaries** extend what imessage-rs can't do alone:
 
-| Binary | Framework | Purpose |
-|---|---|---|
-| `imcore-bridge` | IMCore (private) | Scheduled messages CRUD, connects to `imagent` daemon |
-| `pinned-chats` | IMCore (private) | Reads pinned conversation list from local store |
-| `reverse-geocode` | CoreLocation | Converts lat/lon to street addresses |
+| Binary            | Framework        | Purpose                                               |
+| ----------------- | ---------------- | ----------------------------------------------------- |
+| `imcore-bridge`   | IMCore (private) | Scheduled messages CRUD, connects to `imagent` daemon |
+| `pinned-chats`    | IMCore (private) | Reads pinned conversation list from local store       |
+| `reverse-geocode` | CoreLocation     | Converts lat/lon to street addresses                  |
 
 These require SIP disabled and ad-hoc code signing with private entitlements (handled automatically).
 
@@ -86,17 +89,19 @@ These require SIP disabled and ad-hoc code signing with private entitlements (ha
 
 ### Prerequisites
 
-| Requirement | Why |
-|---|---|
-| macOS Sequoia 15+ | imessage-rs requires modern macOS private frameworks |
-| SIP disabled | Swift binaries and imessage-rs access private IMCore/IDS frameworks |
-| Full Disk Access | Server reads `~/Library/Messages/chat.db` and AddressBook databases |
-| Node.js 22+ | Runs the SvelteKit web server |
+| Requirement       | Why                                                                 |
+| ----------------- | ------------------------------------------------------------------- |
+| macOS Sequoia 15+ | imessage-rs requires modern macOS private frameworks                |
+| SIP disabled      | Swift binaries and imessage-rs access private IMCore/IDS frameworks |
+| Full Disk Access  | Server reads `~/Library/Messages/chat.db` and AddressBook databases |
+| Node.js 22+       | Runs the SvelteKit web server                                       |
 
 **Disable SIP:** Boot into Recovery Mode (hold Power on Apple Silicon, Cmd+R on Intel), open Terminal:
+
 ```sh
 csrutil disable
 ```
+
 Reboot into macOS.
 
 **Full Disk Access:** System Settings > Privacy & Security > Full Disk Access > add your terminal app.
@@ -112,11 +117,13 @@ chmod +x webmessages
 That's it. A random port is chosen automatically and printed to the terminal. Press `Ctrl+C` to stop.
 
 Everything is extracted to `~/.webmessages/`. You can also start directly with:
+
 ```sh
 ~/.webmessages/start.sh
 ```
 
 To pin a specific port:
+
 ```sh
 PORT=3000 ~/.webmessages/start.sh
 ```
@@ -139,11 +146,11 @@ No compilation happens on your machine. Everything is pre-built by GitHub Action
 
 All settings have sensible defaults. Override via env vars if needed:
 
-| Variable | Default | Description |
-|---|---|---|
-| `PORT` | *(random free port)* | Web server port |
-| `IMESSAGE_RS_PORT` | *(random free port)* | imessage-rs API port |
-| `IMESSAGE_RS_PASSWORD` | *(auto-generated)* | Shared secret between web server and imessage-rs |
+| Variable               | Default              | Description                                      |
+| ---------------------- | -------------------- | ------------------------------------------------ |
+| `PORT`                 | _(random free port)_ | Web server port                                  |
+| `IMESSAGE_RS_PORT`     | _(random free port)_ | imessage-rs API port                             |
+| `IMESSAGE_RS_PASSWORD` | _(auto-generated)_   | Shared secret between web server and imessage-rs |
 
 ### Upgrading
 
@@ -155,15 +162,15 @@ Download and run the latest release again. It overwrites binaries and the web se
 
 ### Dev Prerequisites
 
-| Tool | Version | Install |
-|---|---|---|
-| macOS | 15+ | — |
-| SIP | disabled | Recovery Mode |
-| Node.js | 22+ | [nodejs.org](https://nodejs.org) or `nvm install 22` |
-| pnpm | latest | `corepack enable` |
-| Xcode CLT | latest | `xcode-select --install` (provides `swiftc`, `codesign`) |
-| Rust + cargo | latest | `curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \| sh` |
-| imessage-rs | latest | `cargo install imessage-rs` |
+| Tool         | Version  | Install                                                           |
+| ------------ | -------- | ----------------------------------------------------------------- |
+| macOS        | 15+      | —                                                                 |
+| SIP          | disabled | Recovery Mode                                                     |
+| Node.js      | 22+      | [nodejs.org](https://nodejs.org) or `nvm install 22`              |
+| pnpm         | latest   | `corepack enable`                                                 |
+| Xcode CLT    | latest   | `xcode-select --install` (provides `swiftc`, `codesign`)          |
+| Rust + cargo | latest   | `curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \| sh` |
+| imessage-rs  | latest   | `cargo install imessage-rs`                                       |
 
 ### Setup
 
@@ -192,10 +199,10 @@ Dev server runs at `http://localhost:5173`. Use `pnpm dev --host` to expose on y
 
 ### Environment Variables (Dev)
 
-| Variable | Default | Description |
-|---|---|---|
-| `IMESSAGE_RS_URL` | `http://127.0.0.1:1234` | imessage-rs API URL |
-| `IMESSAGE_RS_PASSWORD` | *(required)* | Must match the `--password` flag you started imessage-rs with |
+| Variable               | Default                 | Description                                                   |
+| ---------------------- | ----------------------- | ------------------------------------------------------------- |
+| `IMESSAGE_RS_URL`      | `http://127.0.0.1:1234` | imessage-rs API URL                                           |
+| `IMESSAGE_RS_PASSWORD` | _(required)_            | Must match the `--password` flag you started imessage-rs with |
 
 ### Project Structure
 
@@ -235,17 +242,17 @@ scripts/
 
 ### Tech Stack
 
-| Layer | Technology |
-|---|---|
-| Frontend | SvelteKit 2, Svelte 5 (runes: `$state`, `$derived`, `$effect`, `$props`) |
-| Styling | Tailwind CSS 4 (via Vite plugin, zero-config) |
-| Offline storage | Dexie.js 4 (IndexedDB with `liveQuery` for reactive subscriptions) |
-| Maps | Leaflet 1.9 (CartoDB, ArcGIS tile layers) |
-| Server | SvelteKit adapter-node on Node.js 22 |
-| Real-time | SSE (Server-Sent Events) via custom `EventBroadcaster` |
-| Native bridge | imessage-rs (Rust) + 3 Swift binaries |
-| Testing | Vitest 4 (Node + browser projects), Playwright |
-| Formatting | Prettier with Svelte and Tailwind plugins |
+| Layer           | Technology                                                               |
+| --------------- | ------------------------------------------------------------------------ |
+| Frontend        | SvelteKit 2, Svelte 5 (runes: `$state`, `$derived`, `$effect`, `$props`) |
+| Styling         | Tailwind CSS 4 (via Vite plugin, zero-config)                            |
+| Offline storage | Dexie.js 4 (IndexedDB with `liveQuery` for reactive subscriptions)       |
+| Maps            | Leaflet 1.9 (CartoDB, ArcGIS tile layers)                                |
+| Server          | SvelteKit adapter-node on Node.js 22                                     |
+| Real-time       | SSE (Server-Sent Events) via custom `EventBroadcaster`                   |
+| Native bridge   | imessage-rs (Rust) + 3 Swift binaries                                    |
+| Testing         | Vitest 4 (Node + browser projects), Playwright                           |
+| Formatting      | Prettier with Svelte and Tailwind plugins                                |
 
 ### Authentication
 
@@ -289,6 +296,7 @@ GitHub Actions (`release.yml`) runs on a macOS 15 runner and:
 5. Uploads `webmessages-v1.0.0` to GitHub Releases
 
 To build a release locally:
+
 ```sh
 bash scripts/build-release.sh --version v1.0.0
 # Output: dist/webmessages-v1.0.0 (~9 MB)
@@ -296,7 +304,7 @@ bash scripts/build-release.sh --version v1.0.0
 
 ### CI
 
-- **`ci.yml`** runs on every push to `master`/`imessage-rs` and on PRs: lint, type-check, server unit tests, build verification (Ubuntu, no macOS needed)
+- **`ci.yml`** runs on every push to `master` and on PRs: lint, type-check, server unit tests, build verification (Ubuntu, no macOS needed)
 - **`release.yml`** runs on `v*` tags: full macOS build + release (macOS 15 runner)
 
 ## Contributing

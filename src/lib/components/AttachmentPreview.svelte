@@ -82,9 +82,7 @@
 				{/if}
 
 				<!-- Size badge -->
-				<span
-					class="absolute bottom-0.5 left-0.5 rounded bg-black/50 px-1 text-[8px] text-white"
-				>
+				<span class="absolute bottom-0.5 left-0.5 rounded bg-black/50 px-1 text-[8px] text-white">
 					{formatSize(file.size)}
 				</span>
 

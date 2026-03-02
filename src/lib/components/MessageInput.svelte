@@ -13,7 +13,16 @@
 		onScheduleSend?: (text: string, scheduledAt: number) => Promise<void>;
 	}
 
-	let { chatGuid, onSend, onSendAttachment, onTypingStart, onTypingStop, replyTo = null, onCancelReply = () => {}, onScheduleSend }: Props = $props();
+	let {
+		chatGuid,
+		onSend,
+		onSendAttachment,
+		onTypingStart,
+		onTypingStop,
+		replyTo = null,
+		onCancelReply = () => {},
+		onScheduleSend
+	}: Props = $props();
 
 	let text = $state('');
 	let sending = $state(false);
@@ -215,7 +224,14 @@
 				class="flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-gray-400 transition-colors hover:bg-gray-200 hover:text-gray-600 dark:hover:bg-gray-600 dark:hover:text-gray-300"
 				aria-label="Cancel reply"
 			>
-				<svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+				<svg
+					xmlns="http://www.w3.org/2000/svg"
+					class="h-3.5 w-3.5"
+					fill="none"
+					viewBox="0 0 24 24"
+					stroke="currentColor"
+					stroke-width="2"
+				>
 					<path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
 				</svg>
 			</button>
@@ -225,13 +241,7 @@
 	<AttachmentPreview files={pendingFiles} onRemove={removeFile} />
 
 	<!-- Hidden file input -->
-	<input
-		bind:this={fileInputEl}
-		type="file"
-		multiple
-		onchange={handleFileSelect}
-		class="hidden"
-	/>
+	<input bind:this={fileInputEl} type="file" multiple onchange={handleFileSelect} class="hidden" />
 
 	<div class="flex items-end gap-2 p-3">
 		<!-- Paperclip / attach button -->
@@ -271,7 +281,9 @@
 			<button
 				onclick={send}
 				disabled={(!text.trim() && pendingFiles.length === 0) || sending}
-				class="flex h-9 items-center justify-center rounded-l-full bg-blue-500 pl-3 text-white transition-opacity disabled:opacity-40 {onScheduleSend ? 'pr-1' : 'rounded-r-full pr-3'}"
+				class="flex h-9 items-center justify-center rounded-l-full bg-blue-500 pl-3 text-white transition-opacity disabled:opacity-40 {onScheduleSend
+					? 'pr-1'
+					: 'rounded-r-full pr-3'}"
 				aria-label="Send message"
 			>
 				<svg
@@ -292,7 +304,14 @@
 					class="flex h-9 w-6 items-center justify-center rounded-r-full border-l border-blue-400 bg-blue-500 text-white transition-opacity disabled:opacity-40"
 					aria-label="Schedule send"
 				>
-					<svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5">
+					<svg
+						xmlns="http://www.w3.org/2000/svg"
+						class="h-3 w-3"
+						fill="none"
+						viewBox="0 0 24 24"
+						stroke="currentColor"
+						stroke-width="2.5"
+					>
 						<path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7" />
 					</svg>
 				</button>
@@ -301,7 +320,7 @@
 			{#if showSchedulePopover}
 				<div
 					bind:this={popoverEl}
-					class="absolute bottom-full right-0 z-50 mb-2 w-64 rounded-xl border border-gray-200 bg-white p-3 shadow-lg dark:border-gray-600 dark:bg-gray-800"
+					class="absolute right-0 bottom-full z-50 mb-2 w-64 rounded-xl border border-gray-200 bg-white p-3 shadow-lg dark:border-gray-600 dark:bg-gray-800"
 				>
 					<p class="mb-2 text-xs font-medium text-gray-500 dark:text-gray-400">Schedule message</p>
 					<div class="flex flex-col gap-2">

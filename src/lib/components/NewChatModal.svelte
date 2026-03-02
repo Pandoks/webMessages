@@ -35,11 +35,11 @@
 	});
 
 	$effect(() => {
-		const sub = liveQuery(() =>
-			db.chats.orderBy('lastMessageDate').reverse().toArray()
-		).subscribe((chats) => {
-			allChats = chats;
-		});
+		const sub = liveQuery(() => db.chats.orderBy('lastMessageDate').reverse().toArray()).subscribe(
+			(chats) => {
+				allChats = chats;
+			}
+		);
 		return () => sub.unsubscribe();
 	});
 
@@ -511,7 +511,7 @@
 				<!-- Chips -->
 				{#each selectedRecipients as recipient, i}
 					<span
-						class="flex items-center gap-1 rounded-full bg-blue-100 py-0.5 pl-2.5 pr-0.5 text-sm text-blue-800 dark:bg-blue-900/40 dark:text-blue-300"
+						class="flex items-center gap-1 rounded-full bg-blue-100 py-0.5 pr-0.5 pl-2.5 text-sm text-blue-800 dark:bg-blue-900/40 dark:text-blue-300"
 					>
 						{recipient.displayName}
 						<button
@@ -527,11 +527,7 @@
 								stroke="currentColor"
 								stroke-width="2"
 							>
-								<path
-									stroke-linecap="round"
-									stroke-linejoin="round"
-									d="M6 18L18 6M6 6l12 12"
-								/>
+								<path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
 							</svg>
 						</button>
 					</span>
@@ -552,7 +548,7 @@
 			<!-- Search dropdown -->
 			{#if query.trim() && searchResults.length > 0}
 				<div
-					class="absolute left-0 right-0 top-full z-10 mt-1 max-h-64 overflow-y-auto rounded-lg border border-gray-200 bg-white shadow-lg dark:border-gray-700 dark:bg-gray-800"
+					class="absolute top-full right-0 left-0 z-10 mt-1 max-h-64 overflow-y-auto rounded-lg border border-gray-200 bg-white shadow-lg dark:border-gray-700 dark:bg-gray-800"
 				>
 					{#each searchResults as result, i}
 						<!-- svelte-ignore a11y_no_static_element_interactions -->
@@ -581,11 +577,7 @@
 										stroke="currentColor"
 										stroke-width="2"
 									>
-										<path
-											stroke-linecap="round"
-											stroke-linejoin="round"
-											d="M12 4v16m8-8H4"
-										/>
+										<path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4" />
 									</svg>
 								</div>
 							{:else}

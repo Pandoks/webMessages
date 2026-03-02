@@ -35,7 +35,10 @@ export const POST: RequestHandler = async ({ request }) => {
 		return json({ status: 400, message: 'chatGuid is required' }, { status: 400 });
 	}
 	if (!message || typeof message !== 'string' || !message.trim()) {
-		return json({ status: 400, message: 'message is required and must be non-empty' }, { status: 400 });
+		return json(
+			{ status: 400, message: 'message is required and must be non-empty' },
+			{ status: 400 }
+		);
 	}
 	if (typeof scheduledAt !== 'number' || scheduledAt <= Date.now()) {
 		return json(
@@ -45,12 +48,7 @@ export const POST: RequestHandler = async ({ request }) => {
 	}
 
 	try {
-		const data = await runBridge([
-			'schedule',
-			chatGuid,
-			message.trim(),
-			String(scheduledAt)
-		]);
+		const data = await runBridge(['schedule', chatGuid, message.trim(), String(scheduledAt)]);
 		return json({ status: 201, data }, { status: 201 });
 	} catch (err) {
 		const msg = err instanceof Error ? err.message : 'Failed to schedule message';

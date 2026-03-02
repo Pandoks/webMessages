@@ -27,11 +27,7 @@ export const GET: RequestHandler = async () => {
 		let photoBase64: string | null = null;
 		const id = cardId.trim().replace(/:/g, '_');
 		if (id) {
-			const photoPath = join(
-				homedir(),
-				'.cache/webMessages/contact-photos',
-				`${id}.jpeg`
-			);
+			const photoPath = join(homedir(), '.cache/webMessages/contact-photos', `${id}.jpeg`);
 			try {
 				const buf = await readFile(photoPath);
 				photoBase64 = buf.toString('base64');
