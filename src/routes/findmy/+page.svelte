@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
+	import { onMount, onDestroy } from 'svelte';
 	import { findMyStore } from '$lib/stores/findmy.svelte.js';
 	import FindMyMap from '$lib/components/findmy/FindMyMap.svelte';
 	import FindMySidebar from '$lib/components/findmy/FindMySidebar.svelte';
@@ -9,7 +9,11 @@
 
 	onMount(() => {
 		findMyStore.fetchAll();
-		findMyStore.fetchMyLocation();
+		findMyStore.watchMyLocation();
+	});
+
+	onDestroy(() => {
+		findMyStore.stopWatchingMyLocation();
 	});
 
 	// Find the selected device, friend, or "Me"
