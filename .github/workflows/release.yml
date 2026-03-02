@@ -43,6 +43,8 @@ jobs:
             -framework CoreLocation
 
       - name: Download imessage-rs
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           ARCH=$(uname -m)
           case "$ARCH" in
@@ -50,7 +52,7 @@ jobs:
             x86_64) TARGET="x86_64-apple-darwin" ;;
           esac
 
-          TAG=$(curl -sf https://api.github.com/repos/jesec/imessage-rs/releases/latest | python3 -c "import sys,json; print(json.load(sys.stdin)['tag_name'])")
+          TAG=$(gh release view --repo jesec/imessage-rs --json tagName -q .tagName)
           echo "imessage-rs version: $TAG"
 
           URL="https://github.com/jesec/imessage-rs/releases/download/${TAG}/imessage-rs-${TARGET}.tar.gz"
