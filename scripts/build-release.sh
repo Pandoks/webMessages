@@ -176,10 +176,8 @@ cat > "$OUTPUT" <<'HEADER'
 
 set -euo pipefail
 
-WEBMESSAGES_HOME="$HOME/.webmessages"
-
-echo "Extracting webMessages to $WEBMESSAGES_HOME ..."
-mkdir -p "$WEBMESSAGES_HOME/bin" "$WEBMESSAGES_HOME/web"
+WEBMESSAGES_HOME=$(mktemp -d)
+trap 'rm -rf "$WEBMESSAGES_HOME"' EXIT
 
 # Extract the archive payload after the __ARCHIVE__ marker
 SKIP=$(awk '/^__ARCHIVE__$/{print NR + 1; exit 0; }' "$0")
@@ -195,8 +193,9 @@ codesign --sign - \
   --force \
   "$WEBMESSAGES_HOME/bin/imcore-bridge" 2>/dev/null || true
 
-# Start
-exec bash "$WEBMESSAGES_HOME/start.sh"
+# Start (not exec — so our EXIT trap cleans up the temp dir)
+export WEBMESSAGES_HOME
+bash "$WEBMESSAGES_HOME/start.sh"
 __ARCHIVE__
 HEADER
 
