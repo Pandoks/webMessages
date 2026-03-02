@@ -1,10 +1,33 @@
 #!/usr/bin/env bash
 # webMessages — start imessage-rs + Node server in foreground
-# No files written, no prompts. Override defaults with env vars:
-#   PORT=8080 IMESSAGE_RS_PORT=5000 ./start.sh
+# Usage: ./start.sh [--port 8080] [--imessage-rs-port 5000]
+#   Or override with env vars: PORT=8080 IMESSAGE_RS_PORT=5000 ./start.sh
 # Press Ctrl+C to stop both services
 
 set -euo pipefail
+
+# ── Parse CLI args (override env vars) ──────────────────
+while [[ $# -gt 0 ]]; do
+	case "$1" in
+		--port)
+			[[ -n "${2:-}" ]] || { echo "error: --port requires a value"; exit 1; }
+			PORT="$2"; shift 2 ;;
+		--imessage-rs-port)
+			[[ -n "${2:-}" ]] || { echo "error: --imessage-rs-port requires a value"; exit 1; }
+			IMESSAGE_RS_PORT="$2"; shift 2 ;;
+		-h|--help)
+			echo "Usage: webmessages [--port PORT] [--imessage-rs-port PORT]"
+			echo ""
+			echo "Options:"
+			echo "  --port PORT              Web UI port (default: random free port)"
+			echo "  --imessage-rs-port PORT  imessage-rs API port (default: random free port)"
+			echo "  -h, --help               Show this help"
+			echo ""
+			echo "Environment variables PORT and IMESSAGE_RS_PORT also work."
+			exit 0 ;;
+		*) echo "Unknown argument: $1 (try --help)"; exit 1 ;;
+	esac
+done
 
 WEBMESSAGES_HOME="${WEBMESSAGES_HOME:-$HOME/.webmessages}"
 
