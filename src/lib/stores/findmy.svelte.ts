@@ -271,7 +271,8 @@ class FindMyStore {
 					this.geocodeMyLocation(lat, lon);
 				}
 			},
-			() => {
+			(err: GeolocationPositionError) => {
+				if (err.code === GeolocationPositionError.TIMEOUT) return;
 				this.stopWatchingMyLocation();
 				this.fallbackToIpLocation(profile);
 			},
@@ -280,7 +281,7 @@ class FindMyStore {
 	}
 
 	stopWatchingMyLocation() {
-		if (this.locationWatchId != null) {
+		if (this.locationWatchId != null && typeof navigator !== 'undefined' && navigator.geolocation) {
 			navigator.geolocation.clearWatch(this.locationWatchId);
 			this.locationWatchId = null;
 		}
