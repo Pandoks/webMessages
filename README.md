@@ -109,11 +109,16 @@ chmod +x webmessages
 ./webmessages
 ```
 
-That's it. On first run you'll be prompted to set a password. On subsequent runs it starts immediately. Press `Ctrl+C` to stop.
+That's it. A random port is chosen automatically and printed to the terminal. Press `Ctrl+C` to stop.
 
-Everything is installed to `~/.webmessages/`. You can also start directly with:
+Everything is extracted to `~/.webmessages/`. You can also start directly with:
 ```sh
 ~/.webmessages/start.sh
+```
+
+To pin a specific port:
+```sh
+PORT=3000 ~/.webmessages/start.sh
 ```
 
 ### What the Installer Does
@@ -122,29 +127,27 @@ The downloaded file is a self-extracting shell script. When you run it, it:
 
 1. Extracts pre-compiled binaries and the web server to `~/.webmessages/`
 2. Strips macOS quarantine attributes and re-signs `imcore-bridge`
-3. Runs `start.sh`, which on first run:
+3. Runs `start.sh`, which:
    - Checks macOS version, SIP, Node.js, Full Disk Access
-   - Prompts for an API password and port
-   - Writes `~/.webmessages/.env` and `~/Library/Application Support/imessage-rs/config.yml`
-4. Starts imessage-rs and the Node.js web server
-5. Opens on `http://localhost:3000`
+   - Auto-generates an API password and finds free ports
+   - Starts imessage-rs and the Node.js web server
+4. Prints the URL to the terminal
 
-No compilation happens on your machine. Everything is pre-built by GitHub Actions.
+No compilation happens on your machine. Everything is pre-built by GitHub Actions. No config files are written — everything is passed via environment variables and CLI flags.
 
 ### Environment
 
-The installer creates `~/.webmessages/.env` automatically. If you need to change settings:
+All settings have sensible defaults. Override via env vars if needed:
 
 | Variable | Default | Description |
 |---|---|---|
-| `IMESSAGE_RS_PASSWORD` | *(set on first run)* | Shared secret between web server and imessage-rs |
-| `IMESSAGE_RS_URL` | `http://127.0.0.1:1234` | imessage-rs API URL |
-| `WEBMESSAGES_BIN_DIR` | `~/.webmessages/bin` | Directory containing compiled Swift binaries |
-| `PORT` | `3000` | Web server port |
+| `PORT` | *(random free port)* | Web server port |
+| `IMESSAGE_RS_PORT` | *(random free port)* | imessage-rs API port |
+| `IMESSAGE_RS_PASSWORD` | *(auto-generated)* | Shared secret between web server and imessage-rs |
 
 ### Upgrading
 
-Download and run the latest release again. It overwrites binaries and the web server but preserves your `.env` (password and settings).
+Download and run the latest release again. It overwrites binaries and the web server in `~/.webmessages/`.
 
 ---
 
@@ -175,19 +178,14 @@ pnpm install
 # Compile Swift binaries (once, ad-hoc signed)
 pnpm build:swift
 
-# Configure environment
-cp .env.example .env
-# Edit .env — set IMESSAGE_RS_PASSWORD to match your imessage-rs password
-
-# Start imessage-rs in a separate terminal
-imessage-rs --password <your-password>
-
-# Configure imessage-rs webhook (in ~/Library/Application Support/imessage-rs/config.yml):
-#   webhooks: ["http://localhost:5173/api/webhook"]
+# Start imessage-rs in a separate terminal (all via CLI flags, no config file)
+imessage-rs --password secret --enable-private-api true \
+  --enable-findmy-private-api true \
+  --webhook "http://localhost:5173/api/webhook"
 # Use localhost, not 127.0.0.1 — Vite binds on IPv6
 
-# Start dev server
-pnpm dev
+# Start dev server (password must match)
+IMESSAGE_RS_PASSWORD=secret pnpm dev
 ```
 
 Dev server runs at `http://localhost:5173`. Use `pnpm dev --host` to expose on your Tailscale IP.
@@ -198,7 +196,6 @@ Dev server runs at `http://localhost:5173`. Use `pnpm dev --host` to expose on y
 |---|---|---|
 | `IMESSAGE_RS_URL` | `http://127.0.0.1:1234` | imessage-rs API URL |
 | `IMESSAGE_RS_PASSWORD` | *(required)* | Must match the `--password` flag you started imessage-rs with |
-| `WEBMESSAGES_BIN_DIR` | *(not set)* | Don't set in dev — binary paths fall back to source tree locations |
 
 ### Project Structure
 
