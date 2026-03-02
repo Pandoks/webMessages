@@ -195,7 +195,7 @@ codesign --sign - \
 
 # Start (not exec — so our EXIT trap cleans up the temp dir)
 export WEBMESSAGES_HOME
-bash "$WEBMESSAGES_HOME/start.sh"
+bash "$WEBMESSAGES_HOME/start.sh" "$@"
 __ARCHIVE__
 HEADER
 
