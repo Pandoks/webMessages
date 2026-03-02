@@ -53,6 +53,7 @@
 			address: string | null;
 			name: string;
 			photoBase64: string | null;
+			approximate: boolean;
 		} | null;
 		selectedId: string | null;
 		onSelect: (id: string) => void;
@@ -144,7 +145,9 @@
 				<FindMyListItem
 					id="__me__"
 					name={myLocation.name}
-					subtitle={buildSubtitle(myLocation.address, myLocation.timestamp)}
+					subtitle={myLocation.approximate
+					? 'Approximate location'
+					: buildSubtitle(myLocation.address, myLocation.timestamp)}
 					isSelected={selectedId === '__me__'}
 					avatarUrl={myLocation.photoBase64
 						? `data:image/jpeg;base64,${myLocation.photoBase64}`
