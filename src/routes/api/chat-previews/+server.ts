@@ -40,9 +40,15 @@ export const GET: RequestHandler = async () => {
 				OR (
 					m.text IS NULL
 					AND (m.attributedBody IS NULL OR LENGTH(m.attributedBody) = 0)
-					AND m.cache_has_attachments = 0
 					AND m.item_type = 0
 					AND m.group_action_type = 0
+					AND (
+						m.cache_has_attachments = 0
+						OR NOT EXISTS (
+							SELECT 1 FROM message_attachment_join maj
+							WHERE maj.message_id = m.ROWID
+						)
+					)
 				)
 			)
 		`;
