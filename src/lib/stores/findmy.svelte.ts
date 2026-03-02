@@ -272,6 +272,7 @@ class FindMyStore {
 				}
 			},
 			() => {
+				this.stopWatchingMyLocation();
 				this.fallbackToIpLocation(profile);
 			},
 			{ enableHighAccuracy: true }
@@ -302,7 +303,7 @@ class FindMyStore {
 		try {
 			const res = await fetch('https://ipwho.is/');
 			const data = await res.json();
-			if (!data.success || !data.latitude || !data.longitude) return;
+			if (!data.success || data.latitude == null || data.longitude == null) return;
 
 			this.myLocation = {
 				latitude: data.latitude,
