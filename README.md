@@ -114,33 +114,26 @@ chmod +x webmessages
 ./webmessages
 ```
 
-That's it. A random port is chosen automatically and printed to the terminal. Press `Ctrl+C` to stop.
-
-Everything is extracted to `~/.webmessages/`. You can also start directly with:
-
-```sh
-~/.webmessages/start.sh
-```
+That's it. A random port is chosen automatically and printed to the terminal. Press `Ctrl+C` to stop. Nothing is left on disk — everything extracts to a temp directory and is cleaned up on exit.
 
 To pin a specific port:
 
 ```sh
-PORT=3000 ~/.webmessages/start.sh
+PORT=3000 ./webmessages
 ```
 
-### What the Installer Does
+### How It Works
 
-The downloaded file is a self-extracting shell script. When you run it, it:
+The downloaded file is a self-extracting shell script. Each time you run it, it:
 
-1. Extracts pre-compiled binaries and the web server to `~/.webmessages/`
+1. Extracts pre-compiled binaries and the web server to a temp directory
 2. Strips macOS quarantine attributes and re-signs `imcore-bridge`
-3. Runs `start.sh`, which:
-   - Checks macOS version, SIP, Node.js, Full Disk Access
-   - Auto-generates an API password and finds free ports
-   - Starts imessage-rs and the Node.js web server
-4. Prints the URL to the terminal
+3. Auto-generates an API password and finds free ports
+4. Starts imessage-rs and the Node.js web server
+5. Prints the URL to the terminal
+6. On exit (Ctrl+C), kills both services and deletes the temp directory
 
-No compilation happens on your machine. Everything is pre-built by GitHub Actions. No config files are written — everything is passed via environment variables and CLI flags.
+No compilation, no config files, no persistent state. Everything is pre-built by GitHub Actions.
 
 ### Environment
 
@@ -154,7 +147,7 @@ All settings have sensible defaults. Override via env vars if needed:
 
 ### Upgrading
 
-Download and run the latest release again. It overwrites binaries and the web server in `~/.webmessages/`.
+Download the latest release and replace your binary. There's nothing else to update.
 
 ---
 
