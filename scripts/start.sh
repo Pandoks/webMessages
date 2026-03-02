@@ -105,12 +105,88 @@ info "Running pre-flight checks..."
 preflight
 echo ""
 
-# ── Resolve config (env vars or auto-detect) ─────────────
-IMESSAGE_RS_PASSWORD="${IMESSAGE_RS_PASSWORD:-$(openssl rand -hex 16)}"
-IMESSAGE_RS_PORT="${IMESSAGE_RS_PORT:-$(free_port)}"
+# ── Resolve config ────────────────────────────────────────
 PORT="${PORT:-$(free_port)}"
-IMESSAGE_RS_URL="http://127.0.0.1:${IMESSAGE_RS_PORT}"
 WEBMESSAGES_BIN_DIR="$WEBMESSAGES_HOME/bin"
+IMESSAGE_RS_EXTERNAL=false  # true if we're piggybacking on an existing instance
+
+# ── Detect already-running imessage-rs ────────────────────
+IMESSAGE_RS_CONFIG="${HOME}/Library/Application Support/imessage-rs/config.yml"
+
+detect_running_imessage_rs() {
+	local pid
+	pid=$(pgrep -x imessage-rs 2>/dev/null | head -1) || return 1
+
+	local args port password
+
+	# ── Try CLI args first ──────────────────────────────
+	args=$(ps -o args= -p "$pid" 2>/dev/null) || true
+	port=$(echo "$args" | grep -oE -- '--socket-port [0-9]+' | awk '{print $2}')
+	password=$(echo "$args" | grep -oE -- '--password [^ ]+' | awk '{print $2}')
+
+	# ── Fallback: config file + lsof for port ───────────
+	if [[ -z "$password" && -f "$IMESSAGE_RS_CONFIG" ]]; then
+		password=$(grep -E '^password:' "$IMESSAGE_RS_CONFIG" | awk '{print $2}' | tr -d '"'"'")
+	fi
+	if [[ -z "$port" ]]; then
+		# config file might have socket_port
+		if [[ -f "$IMESSAGE_RS_CONFIG" ]]; then
+			port=$(grep -E '^socket_port:' "$IMESSAGE_RS_CONFIG" | awk '{print $2}' | tr -d '"'"'")
+		fi
+		# last resort: grab the first listening port from lsof
+		if [[ -z "$port" ]]; then
+			port=$(lsof -Pan -p "$pid" -iTCP -sTCP:LISTEN 2>/dev/null \
+				| awk 'NR>1 {split($9,a,":"); print a[2]; exit}')
+		fi
+	fi
+
+	[[ -n "$port" && -n "$password" ]] || return 1
+
+	# Verify the combination actually works
+	if curl -sf "http://127.0.0.1:${port}/api/v1/server/info?password=${password}" >/dev/null 2>&1; then
+		echo "${port} ${password}"
+		return 0
+	fi
+
+	# First port didn't work — try all listening ports (imessage-rs binds multiple)
+	local all_ports
+	all_ports=$(lsof -Pan -p "$pid" -iTCP -sTCP:LISTEN 2>/dev/null \
+		| awk 'NR>1 {split($9,a,":"); print a[2]}')
+	for p in $all_ports; do
+		if curl -sf "http://127.0.0.1:${p}/api/v1/server/info?password=${password}" >/dev/null 2>&1; then
+			echo "${p} ${password}"
+			return 0
+		fi
+	done
+	return 1
+}
+
+existing=$(detect_running_imessage_rs) || existing=""
+
+if [[ -n "$existing" ]]; then
+	IMESSAGE_RS_PORT=$(echo "$existing" | awk '{print $1}')
+	IMESSAGE_RS_PASSWORD=$(echo "$existing" | awk '{print $2}')
+	IMESSAGE_RS_URL="http://127.0.0.1:${IMESSAGE_RS_PORT}"
+	IMESSAGE_RS_EXTERNAL=true
+	ok "Found running imessage-rs on port $IMESSAGE_RS_PORT — piggybacking off existing instance"
+
+	# Check if the existing webhook matches our port
+	existing_args=$(ps -o args= -p "$(pgrep -x imessage-rs | head -1)" 2>/dev/null)
+	existing_webhook=$(echo "$existing_args" | grep -oE -- '--webhook [^ ]+' | awk '{print $2}')
+	# Fallback: check config file for webhook
+	if [[ -z "$existing_webhook" && -f "$IMESSAGE_RS_CONFIG" ]]; then
+		existing_webhook=$(grep -A1 '^webhooks:' "$IMESSAGE_RS_CONFIG" | tail -1 | sed 's/.*- *"\{0,1\}//' | sed 's/"\{0,1\} *$//')
+	fi
+	if [[ -n "$existing_webhook" && "$existing_webhook" != *":${PORT}/"* ]]; then
+		warn "Existing instance's webhook is $existing_webhook"
+		warn "Real-time updates (typing indicators, new messages) won't reach this webMessages instance"
+		warn "To fix: stop the other instance and let webMessages manage imessage-rs"
+	fi
+else
+	IMESSAGE_RS_PASSWORD="${IMESSAGE_RS_PASSWORD:-$(openssl rand -hex 16)}"
+	IMESSAGE_RS_PORT="${IMESSAGE_RS_PORT:-$(free_port)}"
+	IMESSAGE_RS_URL="http://127.0.0.1:${IMESSAGE_RS_PORT}"
+fi
 
 # ── Cleanup on exit ────────────────────────────────────
 IMESSAGE_RS_PID=""
@@ -123,7 +199,7 @@ cleanup() {
 		kill "$NODE_PID" 2>/dev/null
 		wait "$NODE_PID" 2>/dev/null || true
 	fi
-	if [[ -n "$IMESSAGE_RS_PID" ]] && kill -0 "$IMESSAGE_RS_PID" 2>/dev/null; then
+	if [[ "$IMESSAGE_RS_EXTERNAL" == "false" && -n "$IMESSAGE_RS_PID" ]] && kill -0 "$IMESSAGE_RS_PID" 2>/dev/null; then
 		kill "$IMESSAGE_RS_PID" 2>/dev/null
 		wait "$IMESSAGE_RS_PID" 2>/dev/null || true
 	fi
@@ -131,43 +207,45 @@ cleanup() {
 }
 trap cleanup SIGINT SIGTERM EXIT
 
-# ── Start imessage-rs (CLI flags only, no config file) ───
-IMESSAGE_RS_BIN="$WEBMESSAGES_HOME/bin/imessage-rs"
-if [[ ! -x "$IMESSAGE_RS_BIN" ]]; then
-	err "imessage-rs binary not found at $IMESSAGE_RS_BIN"
-	exit 1
+# ── Start imessage-rs (skip if piggybacking) ─────────────
+if [[ "$IMESSAGE_RS_EXTERNAL" == "false" ]]; then
+	IMESSAGE_RS_BIN="$WEBMESSAGES_HOME/bin/imessage-rs"
+	if [[ ! -x "$IMESSAGE_RS_BIN" ]]; then
+		err "imessage-rs binary not found at $IMESSAGE_RS_BIN"
+		exit 1
+	fi
+
+	info "Starting imessage-rs on port $IMESSAGE_RS_PORT..."
+	"$IMESSAGE_RS_BIN" \
+		--password "$IMESSAGE_RS_PASSWORD" \
+		--socket-port "$IMESSAGE_RS_PORT" \
+		--enable-private-api true \
+		--enable-findmy-private-api true \
+		--webhook "http://localhost:${PORT}/api/webhook" &
+	IMESSAGE_RS_PID=$!
+
+	# Wait for imessage-rs to be ready
+	printf "${CYAN}[info]${NC}  Waiting for imessage-rs"
+	for i in $(seq 1 30); do
+		if curl -sf "${IMESSAGE_RS_URL}/api/v1/server/info?password=${IMESSAGE_RS_PASSWORD}" >/dev/null 2>&1; then
+			printf "\n"
+			ok "imessage-rs ready"
+			break
+		fi
+		if ! kill -0 "$IMESSAGE_RS_PID" 2>/dev/null; then
+			printf "\n"
+			err "imessage-rs exited unexpectedly"
+			exit 1
+		fi
+		printf "."
+		sleep 1
+		if [[ $i -eq 30 ]]; then
+			printf "\n"
+			err "imessage-rs did not respond within 30 seconds"
+			exit 1
+		fi
+	done
 fi
-
-info "Starting imessage-rs on port $IMESSAGE_RS_PORT..."
-"$IMESSAGE_RS_BIN" \
-	--password "$IMESSAGE_RS_PASSWORD" \
-	--socket-port "$IMESSAGE_RS_PORT" \
-	--enable-private-api true \
-	--enable-findmy-private-api true \
-	--webhook "http://localhost:${PORT}/api/webhook" &
-IMESSAGE_RS_PID=$!
-
-# Wait for imessage-rs to be ready
-printf "${CYAN}[info]${NC}  Waiting for imessage-rs"
-for i in $(seq 1 30); do
-	if curl -sf "${IMESSAGE_RS_URL}/api/v1/server/info?password=${IMESSAGE_RS_PASSWORD}" >/dev/null 2>&1; then
-		printf "\n"
-		ok "imessage-rs ready"
-		break
-	fi
-	if ! kill -0 "$IMESSAGE_RS_PID" 2>/dev/null; then
-		printf "\n"
-		err "imessage-rs exited unexpectedly"
-		exit 1
-	fi
-	printf "."
-	sleep 1
-	if [[ $i -eq 30 ]]; then
-		printf "\n"
-		err "imessage-rs did not respond within 30 seconds"
-		exit 1
-	fi
-done
 
 # ── Start Node.js server ──────────────────────────────
 info "Starting webMessages on port $PORT..."
@@ -190,14 +268,21 @@ ok "webMessages is running at http://localhost:${PORT}"
 info "Press Ctrl+C to stop."
 echo ""
 
-# ── Wait for either process to exit ───────────────────
-while kill -0 "$IMESSAGE_RS_PID" 2>/dev/null && kill -0 "$NODE_PID" 2>/dev/null; do
-	wait -n "$IMESSAGE_RS_PID" "$NODE_PID" 2>/dev/null || true
-done
-
-if ! kill -0 "$IMESSAGE_RS_PID" 2>/dev/null; then
-	err "imessage-rs exited unexpectedly"
-fi
-if ! kill -0 "$NODE_PID" 2>/dev/null; then
-	err "Node.js server exited unexpectedly"
+# ── Wait for processes to exit ─────────────────────────
+if [[ "$IMESSAGE_RS_EXTERNAL" == "false" ]]; then
+	while kill -0 "$IMESSAGE_RS_PID" 2>/dev/null && kill -0 "$NODE_PID" 2>/dev/null; do
+		wait -n "$IMESSAGE_RS_PID" "$NODE_PID" 2>/dev/null || true
+	done
+	if ! kill -0 "$IMESSAGE_RS_PID" 2>/dev/null; then
+		err "imessage-rs exited unexpectedly"
+	fi
+	if ! kill -0 "$NODE_PID" 2>/dev/null; then
+		err "Node.js server exited unexpectedly"
+	fi
+else
+	# Piggybacking — only watch our own Node.js server
+	wait "$NODE_PID" 2>/dev/null || true
+	if ! kill -0 "$NODE_PID" 2>/dev/null; then
+		err "Node.js server exited"
+	fi
 fi
