@@ -204,6 +204,7 @@ export class SyncEngine {
 	}
 
 	async handleEvent(type: string, data: unknown) {
+		try {
 		switch (type) {
 			case 'new-message': {
 				const msg = data as Message;
@@ -350,6 +351,9 @@ export class SyncEngine {
 				}
 				break;
 			}
+		}
+		} catch (err) {
+			console.error(`[Sync] Failed to handle ${type} event:`, err);
 		}
 	}
 
