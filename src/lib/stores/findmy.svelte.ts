@@ -47,6 +47,7 @@ class FindMyStore {
 	private cachedContactMap: Record<string, string> = {};
 	private cachedPhotoMap: Record<string, string> = {};
 	private locationWatchId: number | null = null;
+	private geoRetryInterval: ReturnType<typeof setInterval> | null = null;
 
 	private transformDevice(raw: RawDevice): FindMyDevice {
 		return {
@@ -251,28 +252,45 @@ class FindMyStore {
 		// Google's Network Location Service which Ungoogled Chromium strips.
 		// Race getCurrentPosition against IP geolocation: if browser geolocation
 		// wins, use watchPosition for accurate ongoing updates. If IP wins (or
-		// browser never responds), use IP immediately.
+		// browser never responds), use IP immediately and retry every 60s.
 		if (/Linux/.test(navigator.userAgent)) {
-			const geoPromise = new Promise<'geo'>((resolve, reject) => {
-				const timer = setTimeout(() => reject(), 5000);
-				navigator.geolocation.getCurrentPosition(
-					() => {
-						clearTimeout(timer);
-						resolve('geo');
-					},
-					() => {
-						clearTimeout(timer);
-						reject();
-					},
-					{ timeout: 5000 }
-				);
-			});
-			const ipPromise = this.fallbackToIpLocation(profile).then(() => 'ip' as const);
-
-			const winner = await Promise.any([geoPromise, ipPromise]).catch(() => 'ip');
-			if (winner === 'ip') return;
+			const winner = await this.raceGeoLocation(profile);
+			if (winner === 'ip') {
+				this.geoRetryInterval = setInterval(async () => {
+					const result = await this.raceGeoLocation(profile);
+					if (result === 'geo') {
+						this.clearGeoRetry();
+						this.startWatchPosition(profile);
+					}
+				}, 60000);
+				return;
+			}
 		}
 
+		this.startWatchPosition(profile);
+	}
+
+	private async raceGeoLocation(profile: { name: string; photoBase64: string | null }): Promise<'geo' | 'ip'> {
+		const geoPromise = new Promise<'geo'>((resolve, reject) => {
+			const timer = setTimeout(() => reject(), 5000);
+			navigator.geolocation.getCurrentPosition(
+				() => {
+					clearTimeout(timer);
+					resolve('geo');
+				},
+				() => {
+					clearTimeout(timer);
+					reject();
+				},
+				{ timeout: 5000 }
+			);
+		});
+		const ipPromise = this.fallbackToIpLocation(profile).then(() => 'ip' as const);
+
+		return Promise.any([geoPromise, ipPromise]).catch(() => 'ip');
+	}
+
+	private startWatchPosition(profile: { name: string; photoBase64: string | null }) {
 		this.stopWatchingMyLocation();
 
 		this.locationWatchId = navigator.geolocation.watchPosition(
@@ -306,7 +324,15 @@ class FindMyStore {
 		);
 	}
 
+	private clearGeoRetry() {
+		if (this.geoRetryInterval != null) {
+			clearInterval(this.geoRetryInterval);
+			this.geoRetryInterval = null;
+		}
+	}
+
 	stopWatchingMyLocation() {
+		this.clearGeoRetry();
 		if (this.locationWatchId != null && typeof navigator !== 'undefined' && navigator.geolocation) {
 			navigator.geolocation.clearWatch(this.locationWatchId);
 			this.locationWatchId = null;
