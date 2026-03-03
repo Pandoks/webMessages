@@ -270,7 +270,10 @@ class FindMyStore {
 		this.startWatchPosition(profile);
 	}
 
-	private async raceGeoLocation(profile: { name: string; photoBase64: string | null }): Promise<'geo' | 'ip'> {
+	private async raceGeoLocation(profile: {
+		name: string;
+		photoBase64: string | null;
+	}): Promise<'geo' | 'ip'> {
 		const geoPromise = new Promise<'geo'>((resolve, reject) => {
 			const timer = setTimeout(() => reject(), 5000);
 			navigator.geolocation.getCurrentPosition(
