@@ -166,31 +166,32 @@
 	// Track whether a read receipt needs to be sent when the app becomes active
 	let pendingReadReceipt = $state(false);
 
-	// Mark as read — clear locally always, but only send read receipt when app is active
+	// Helper: fire-and-forget read receipt (not tied to effect lifecycle)
+	function sendReadReceipt(guid: string) {
+		fetch(`/api/proxy/chat/${encodeURIComponent(guid)}/read`, { method: 'POST' }).catch(
+			() => {}
+		);
+	}
+
+	// Mark as read — fire API call immediately, then clear locally
 	$effect(() => {
 		if (!chat || chat.unreadCount === 0) return;
 
-		db.chats.update(chatGuid, { unreadCount: 0 });
-
 		if (visibilityStore.isActive) {
-			const timer = setTimeout(() => {
-				fetch(`/api/proxy/chat/${encodeURIComponent(chatGuid)}/read`, { method: 'POST' });
-			}, 2000);
-			return () => clearTimeout(timer);
+			sendReadReceipt(chatGuid);
 		} else {
 			pendingReadReceipt = true;
 		}
+
+		db.chats.update(chatGuid, { unreadCount: 0 });
 	});
 
 	// Send deferred read receipt when returning to the app
 	$effect(() => {
 		if (!visibilityStore.isActive || !pendingReadReceipt) return;
 
-		const timer = setTimeout(() => {
-			pendingReadReceipt = false;
-			fetch(`/api/proxy/chat/${encodeURIComponent(chatGuid)}/read`, { method: 'POST' });
-		}, 2000);
-		return () => clearTimeout(timer);
+		pendingReadReceipt = false;
+		sendReadReceipt(chatGuid);
 	});
 
 	// Clear reply and pending read receipt when switching chats
