@@ -22,8 +22,8 @@ function ipwhoGet(ip: string): Promise<Record<string, unknown>> {
 
 export const GET: RequestHandler = async ({ url }) => {
 	const clientIp = url.searchParams.get('ip');
-	if (!clientIp) {
-		return json({ error: 'Missing ip query param' }, { status: 400 });
+	if (!clientIp || !/^\d{1,3}(\.\d{1,3}){3}$/.test(clientIp)) {
+		return json({ error: 'Missing or invalid ip query param' }, { status: 400 });
 	}
 
 	try {
