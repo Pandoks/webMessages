@@ -25,8 +25,6 @@ export class SyncEngine {
 
 	async start() {
 		this.sse.onEvent((type, data) => this.handleEvent(type, data));
-		this.sse.connect('/api/events');
-		this.connected = true;
 
 		const meta = await db.syncMeta.get('lastSyncTimestamp');
 		if (meta) {
@@ -34,6 +32,10 @@ export class SyncEngine {
 		} else {
 			await this.initialSync();
 		}
+
+		// Connect SSE AFTER sync — chats must be in IndexedDB before events arrive
+		this.sse.connect('/api/events');
+		this.connected = true;
 	}
 
 	stop() {
