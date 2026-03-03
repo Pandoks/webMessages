@@ -244,7 +244,7 @@ class FindMyStore {
 			.catch(() => ({ name: 'Me', photoBase64: null }));
 
 		if (typeof navigator === 'undefined' || !navigator.geolocation) {
-			await this.fallbackToIpLocation(profile);
+			await this.fallbackToIpLocation(profile).catch(() => {});
 			return;
 		}
 
@@ -331,7 +331,7 @@ class FindMyStore {
 			(err: GeolocationPositionError) => {
 				if (err.code === GeolocationPositionError.TIMEOUT) return;
 				this.stopWatchingMyLocation();
-				this.fallbackToIpLocation(profile);
+				this.fallbackToIpLocation(profile).catch(() => {});
 			},
 			{ enableHighAccuracy: true }
 		);
@@ -366,29 +366,27 @@ class FindMyStore {
 	}
 
 	private async fallbackToIpLocation(profile: { name: string; photoBase64: string | null }) {
-		try {
-			// Get the client's real public IP (icanhazip.com supports CORS)
-			const ipRes = await fetch('https://ipv4.icanhazip.com');
-			const ip = (await ipRes.text()).trim();
-			if (!ip) return;
+		// Get the client's real public IP (icanhazip.com supports CORS)
+		const ipRes = await fetch('https://ipv4.icanhazip.com');
+		const ip = (await ipRes.text()).trim();
+		if (!ip) throw new Error('No IP returned');
 
-			// Pass it to our server which queries ipwho.is (no CORS there)
-			const res = await fetch(`/api/ip-location?ip=${encodeURIComponent(ip)}`);
-			const data = await res.json();
-			if (!res.ok || data.latitude == null || data.longitude == null) return;
-
-			this.myLocation = {
-				latitude: data.latitude,
-				longitude: data.longitude,
-				timestamp: Date.now(),
-				address: [data.city, data.region, data.country].filter(Boolean).join(', ') || null,
-				name: profile.name || 'Me',
-				photoBase64: profile.photoBase64,
-				approximate: true
-			};
-		} catch {
-			// IP geolocation failed too, myLocation stays null
+		// Pass it to our server which queries ipwho.is (no CORS there)
+		const res = await fetch(`/api/ip-location?ip=${encodeURIComponent(ip)}`);
+		const data = await res.json();
+		if (!res.ok || data.latitude == null || data.longitude == null) {
+			throw new Error('IP geolocation failed');
 		}
+
+		this.myLocation = {
+			latitude: data.latitude,
+			longitude: data.longitude,
+			timestamp: Date.now(),
+			address: [data.city, data.region, data.country].filter(Boolean).join(', ') || null,
+			name: profile.name || 'Me',
+			photoBase64: profile.photoBase64,
+			approximate: true
+		};
 	}
 
 	private haversineMeters(lat1: number, lon1: number, lat2: number, lon2: number): number {
