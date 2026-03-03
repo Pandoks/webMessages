@@ -367,7 +367,13 @@ class FindMyStore {
 
 	private async fallbackToIpLocation(profile: { name: string; photoBase64: string | null }) {
 		try {
-			const res = await fetch('/api/ip-location');
+			// Get the client's real public IP (jsonip.com supports CORS)
+			const ipRes = await fetch('https://jsonip.com');
+			const { ip } = await ipRes.json();
+			if (!ip) return;
+
+			// Pass it to our server which queries ipwho.is (no CORS there)
+			const res = await fetch(`/api/ip-location?ip=${encodeURIComponent(ip)}`);
 			const data = await res.json();
 			if (!res.ok || data.latitude == null || data.longitude == null) return;
 

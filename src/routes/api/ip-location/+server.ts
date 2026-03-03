@@ -1,8 +1,11 @@
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types.js';
 
-export const GET: RequestHandler = async ({ getClientAddress }) => {
-	const clientIp = getClientAddress();
+export const GET: RequestHandler = async ({ url }) => {
+	const clientIp = url.searchParams.get('ip');
+	if (!clientIp) {
+		return json({ error: 'Missing ip query param' }, { status: 400 });
+	}
 
 	try {
 		const res = await fetch(`https://ipwho.is/${clientIp}`);
