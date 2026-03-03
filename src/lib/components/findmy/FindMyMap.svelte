@@ -230,9 +230,10 @@
 		if (myLocation) {
 			const isSelected = selectedId === '__me__';
 			const size = isSelected ? 24 : 18;
+			const approxClass = myLocation.approximate ? ' approximate' : '';
 			const icon = L.divIcon({
 				className: '',
-				html: `<div class="findmy-marker findmy-marker--me${isSelected ? ' selected' : ''}"><div class="findmy-me-pulse"></div><div class="findmy-me-dot"></div></div>`,
+				html: `<div class="findmy-marker findmy-marker--me${isSelected ? ' selected' : ''}${approxClass}"><div class="findmy-me-pulse"></div><div class="findmy-me-dot"></div></div>`,
 				iconSize: [size, size],
 				iconAnchor: [size / 2, size / 2]
 			});
@@ -527,6 +528,18 @@
 		animation: findmy-pulse 2s ease-out infinite;
 	}
 
+	/* Approximate "Me" — dimmer dot with dashed ring instead of pulse */
+	:global(.findmy-marker--me.approximate .findmy-me-dot) {
+		background: #93c5fd;
+		border-color: rgba(255, 255, 255, 0.7);
+	}
+
+	:global(.findmy-marker--me.approximate .findmy-me-pulse) {
+		background: none;
+		border: 2px dashed rgba(59, 130, 246, 0.5);
+		animation: findmy-pulse-approx 3s linear infinite;
+	}
+
 	@keyframes findmy-pulse {
 		0% {
 			transform: translate(-50%, -50%) scale(1);
@@ -535,6 +548,15 @@
 		100% {
 			transform: translate(-50%, -50%) scale(2.5);
 			opacity: 0;
+		}
+	}
+
+	@keyframes findmy-pulse-approx {
+		0% {
+			transform: translate(-50%, -50%) rotate(0deg);
+		}
+		100% {
+			transform: translate(-50%, -50%) rotate(360deg);
 		}
 	}
 </style>
