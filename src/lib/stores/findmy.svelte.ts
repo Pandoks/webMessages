@@ -247,6 +247,32 @@ class FindMyStore {
 			return;
 		}
 
+		// On Linux, there's no OS-level location service — browsers rely on
+		// Google's Network Location Service which Ungoogled Chromium strips.
+		// Race getCurrentPosition against IP geolocation: if browser geolocation
+		// wins, use watchPosition for accurate ongoing updates. If IP wins (or
+		// browser never responds), use IP immediately.
+		if (/Linux/.test(navigator.userAgent)) {
+			const geoPromise = new Promise<'geo'>((resolve, reject) => {
+				const timer = setTimeout(() => reject(), 5000);
+				navigator.geolocation.getCurrentPosition(
+					() => {
+						clearTimeout(timer);
+						resolve('geo');
+					},
+					() => {
+						clearTimeout(timer);
+						reject();
+					},
+					{ timeout: 5000 }
+				);
+			});
+			const ipPromise = this.fallbackToIpLocation(profile).then(() => 'ip' as const);
+
+			const winner = await Promise.any([geoPromise, ipPromise]).catch(() => 'ip');
+			if (winner === 'ip') return;
+		}
+
 		this.stopWatchingMyLocation();
 
 		this.locationWatchId = navigator.geolocation.watchPosition(
