@@ -32,6 +32,7 @@
 	let isDark = $state(false);
 	let L: typeof import('leaflet') | null = null;
 	let observer: MutationObserver | null = null;
+	let hasInitialFit = false;
 
 	const cartoAttribution =
 		'&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/">CARTO</a>';
@@ -260,8 +261,9 @@
 		}
 
 		// Only fit all bounds on initial load (no selection)
-		if (!selectedId && bounds.length > 0) {
+		if (!hasInitialFit && !selectedId && bounds.length > 0) {
 			map.fitBounds(bounds as L.LatLngBoundsExpression, { padding: [50, 50], maxZoom: 15 });
+			hasInitialFit = true;
 		}
 	}
 
