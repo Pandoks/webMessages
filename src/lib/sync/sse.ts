@@ -1,4 +1,4 @@
-export type SSEEventHandler = (type: string, data: unknown) => void;
+export type SSEEventHandler = (type: string, data: unknown) => void | Promise<void>;
 
 export class SSEClient {
 	private source: EventSource | null = null;
@@ -30,9 +30,24 @@ export class SSEClient {
 
 		for (const type of eventTypes) {
 			this.source.addEventListener(type, (e) => {
-				const data = JSON.parse((e as MessageEvent).data);
+				let data: unknown;
+				try {
+					data = JSON.parse((e as MessageEvent).data);
+				} catch (err) {
+					console.error(`[SSE] Failed to parse ${type} event data:`, err);
+					return;
+				}
 				for (const handler of this.handlers) {
-					handler(type, data);
+					try {
+						const result = handler(type, data);
+						if (result instanceof Promise) {
+							result.catch((err) =>
+								console.error(`[SSE] Handler error for ${type}:`, err)
+							);
+						}
+					} catch (err) {
+						console.error(`[SSE] Sync handler error for ${type}:`, err);
+					}
 				}
 			});
 		}
