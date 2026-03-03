@@ -208,22 +208,29 @@ export class SyncEngine {
 		switch (type) {
 			case 'new-message': {
 				const msg = data as Message;
+
+				// Resolve chatGuid OUTSIDE the transaction (API fallback uses fetch)
+				let chatGuid = msg.chats?.[0]?.guid ?? '';
+				if (!chatGuid) {
+					const existing = await db.messages.get(msg.guid);
+					if (existing?.chatGuid) {
+						chatGuid = existing.chatGuid;
+					}
+				}
+				if (!chatGuid && msg.handle?.address) {
+					chatGuid = await this.resolveChatGuid(msg.handle.address);
+				}
+				if (!chatGuid && msg.handle?.address) {
+					chatGuid = await this.resolveChatGuidFromApi(msg.handle.address);
+				}
+				if (!chatGuid) {
+					console.warn('[Sync] Could not resolve chatGuid for message:', msg.guid);
+				}
+
 				await db.transaction(
 					'rw',
 					[db.messages, db.chats, db.attachments, db.handles],
 					async () => {
-						// Webhook payloads have chats: [] — resolve chatGuid
-						let chatGuid = msg.chats?.[0]?.guid ?? '';
-						if (!chatGuid) {
-							const existing = await db.messages.get(msg.guid);
-							if (existing?.chatGuid) {
-								chatGuid = existing.chatGuid;
-							}
-						}
-						if (!chatGuid && msg.handle?.address) {
-							chatGuid = await this.resolveChatGuid(msg.handle.address);
-						}
-
 						await db.messages.put(messageToDb(msg, chatGuid || undefined));
 
 						if (msg.handle) {
@@ -641,6 +648,38 @@ export class SyncEngine {
 			.filter((c) => c.style === 45 && c.participants.length === 1 && c.participants[0] === address)
 			.toArray();
 		return chats[0]?.guid ?? '';
+	}
+
+	/** Fallback: resolve chatGuid by querying the imessage-rs API */
+	private async resolveChatGuidFromApi(address: string): Promise<string> {
+		try {
+			const res = await proxyPost<Chat[]>('/api/proxy/chat/query', {
+				with: ['participants'],
+				limit: 10
+			});
+			if (!res.data?.length) return '';
+
+			// Find a 1:1 chat that includes this address
+			const match = res.data.find(
+				(c) =>
+					c.style === 45 &&
+					c.participants?.some((p) => p.address === address)
+			);
+			if (!match) return '';
+
+			// Store the chat in IndexedDB so future lookups succeed locally
+			await db.chats.put(chatToDb(match));
+			if (match.participants) {
+				for (const handle of match.participants) {
+					await this.upsertHandle(handle);
+				}
+			}
+
+			return match.guid;
+		} catch (err) {
+			console.warn('[Sync] API chat resolution failed:', err);
+			return '';
+		}
 	}
 
 	/** Upsert a handle, preserving existing displayName and avatarBase64 */
