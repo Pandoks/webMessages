@@ -4,6 +4,9 @@ import { playwright } from '@vitest/browser-playwright';
 import { sveltekit } from '@sveltejs/kit/vite';
 
 export default defineConfig({
+	server: {
+		allowedHosts: ['web-messages.tailb2c81d.ts.net']
+	},
 	plugins: [tailwindcss(), sveltekit()],
 	test: {
 		expect: { requireAssertions: true },
