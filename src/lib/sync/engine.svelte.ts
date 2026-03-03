@@ -205,160 +205,160 @@ export class SyncEngine {
 
 	async handleEvent(type: string, data: unknown) {
 		try {
-		switch (type) {
-			case 'new-message': {
-				const msg = data as Message;
+			switch (type) {
+				case 'new-message': {
+					const msg = data as Message;
 
-				// Resolve chatGuid OUTSIDE the transaction (API fallback uses fetch)
-				let chatGuid = msg.chats?.[0]?.guid ?? '';
-				if (!chatGuid) {
-					const existing = await db.messages.get(msg.guid);
-					if (existing?.chatGuid) {
-						chatGuid = existing.chatGuid;
-					}
-				}
-				if (!chatGuid && msg.handle?.address) {
-					chatGuid = await this.resolveChatGuid(msg.handle.address);
-				}
-				if (!chatGuid && msg.handle?.address) {
-					chatGuid = await this.resolveChatGuidFromApi(msg.handle.address);
-				}
-				if (!chatGuid) {
-					console.warn('[Sync] Could not resolve chatGuid for message:', msg.guid);
-				}
-
-				await db.transaction(
-					'rw',
-					[db.messages, db.chats, db.attachments, db.handles],
-					async () => {
-						await db.messages.put(messageToDb(msg, chatGuid || undefined));
-
-						if (msg.handle) {
-							await this.upsertHandle(msg.handle);
+					// Resolve chatGuid OUTSIDE the transaction (API fallback uses fetch)
+					let chatGuid = msg.chats?.[0]?.guid ?? '';
+					if (!chatGuid) {
+						const existing = await db.messages.get(msg.guid);
+						if (existing?.chatGuid) {
+							chatGuid = existing.chatGuid;
 						}
+					}
+					if (!chatGuid && msg.handle?.address) {
+						chatGuid = await this.resolveChatGuid(msg.handle.address);
+					}
+					if (!chatGuid && msg.handle?.address) {
+						chatGuid = await this.resolveChatGuidFromApi(msg.handle.address);
+					}
+					if (!chatGuid) {
+						console.warn('[Sync] Could not resolve chatGuid for message:', msg.guid);
+					}
+
+					await db.transaction(
+						'rw',
+						[db.messages, db.chats, db.attachments, db.handles],
+						async () => {
+							await db.messages.put(messageToDb(msg, chatGuid || undefined));
+
+							if (msg.handle) {
+								await this.upsertHandle(msg.handle);
+							}
+							if (msg.attachments) {
+								for (const att of msg.attachments) {
+									await db.attachments.put(attachmentToDb(att, msg.guid));
+								}
+							}
+
+							// Update chat's last message and unread count
+							if (chatGuid) {
+								const chat = await db.chats.get(chatGuid);
+								if (chat) {
+									const storedMsg = await db.messages.get(msg.guid);
+									const updates: Partial<typeof chat> = {
+										lastMessageDate: msg.dateCreated,
+										lastMessageText: storedMsg ? derivePreviewText(storedMsg) : (msg.text ?? null)
+									};
+									if (!msg.isFromMe) {
+										updates.unreadCount = (chat.unreadCount ?? 0) + 1;
+									}
+									await db.chats.update(chatGuid, updates);
+								}
+							}
+						}
+					);
+					// Refresh eligibility for sent messages
+					if (msg.isFromMe) this.syncEligibility().catch(() => {});
+					break;
+				}
+
+				case 'updated-message': {
+					const msg = data as Message;
+					await db.transaction('rw', [db.messages, db.attachments, db.chats], async () => {
+						// Webhook payloads have chats: [] — resolve chatGuid
+						const existing = await db.messages.get(msg.guid);
+						let chatGuid = msg.chats?.[0]?.guid || existing?.chatGuid || '';
+						if (!chatGuid && msg.handle?.address) {
+							chatGuid = await this.resolveChatGuid(msg.handle.address);
+						}
+						const dbMsg = messageToDb(msg, chatGuid || undefined);
+						// Preserve locally-authoritative dateRetracted — imessage-rs never returns it
+						if (!dbMsg.dateRetracted && existing?.dateRetracted) {
+							dbMsg.dateRetracted = existing.dateRetracted;
+						}
+						await db.messages.put(dbMsg);
+
 						if (msg.attachments) {
 							for (const att of msg.attachments) {
 								await db.attachments.put(attachmentToDb(att, msg.guid));
 							}
 						}
 
-						// Update chat's last message and unread count
+						// Update chat preview using the MERGED message state
 						if (chatGuid) {
 							const chat = await db.chats.get(chatGuid);
-							if (chat) {
-								const storedMsg = await db.messages.get(msg.guid);
-								const updates: Partial<typeof chat> = {
-									lastMessageDate: msg.dateCreated,
-									lastMessageText: storedMsg ? derivePreviewText(storedMsg) : (msg.text ?? null)
-								};
-								if (!msg.isFromMe) {
-									updates.unreadCount = (chat.unreadCount ?? 0) + 1;
-								}
-								await db.chats.update(chatGuid, updates);
-							}
-						}
-					}
-				);
-				// Refresh eligibility for sent messages
-				if (msg.isFromMe) this.syncEligibility().catch(() => {});
-				break;
-			}
-
-			case 'updated-message': {
-				const msg = data as Message;
-				await db.transaction('rw', [db.messages, db.attachments, db.chats], async () => {
-					// Webhook payloads have chats: [] — resolve chatGuid
-					const existing = await db.messages.get(msg.guid);
-					let chatGuid = msg.chats?.[0]?.guid || existing?.chatGuid || '';
-					if (!chatGuid && msg.handle?.address) {
-						chatGuid = await this.resolveChatGuid(msg.handle.address);
-					}
-					const dbMsg = messageToDb(msg, chatGuid || undefined);
-					// Preserve locally-authoritative dateRetracted — imessage-rs never returns it
-					if (!dbMsg.dateRetracted && existing?.dateRetracted) {
-						dbMsg.dateRetracted = existing.dateRetracted;
-					}
-					await db.messages.put(dbMsg);
-
-					if (msg.attachments) {
-						for (const att of msg.attachments) {
-							await db.attachments.put(attachmentToDb(att, msg.guid));
-						}
-					}
-
-					// Update chat preview using the MERGED message state
-					if (chatGuid) {
-						const chat = await db.chats.get(chatGuid);
-						if (chat && dbMsg.dateCreated >= chat.lastMessageDate) {
-							await db.chats.update(chatGuid, {
-								lastMessageText: derivePreviewText(dbMsg)
-							});
-						}
-					}
-				});
-				break;
-			}
-
-			case 'typing-indicator': {
-				const indicator = data as { chatGuid: string; address: string; isTyping: boolean };
-				const current = this.typingIndicators.get(indicator.chatGuid) ?? new Set<string>();
-				if (indicator.isTyping) {
-					current.add(indicator.address);
-				} else {
-					current.delete(indicator.address);
-				}
-				// Reassign to trigger reactivity
-				this.typingIndicators = new Map(this.typingIndicators.set(indicator.chatGuid, current));
-				break;
-			}
-
-			case 'chat-read-status-changed': {
-				const event = data as { chatGuid: string };
-				await db.chats.update(event.chatGuid, { unreadCount: 0 });
-				break;
-			}
-
-			case 'group-name-change': {
-				const event = data as { chatGuid: string; newName: string };
-				await db.chats.update(event.chatGuid, { displayName: event.newName });
-				break;
-			}
-
-			case 'new-findmy-location': {
-				findMyStore.applyLocationUpdate(data);
-				break;
-			}
-
-			case 'participant-added':
-			case 'participant-removed':
-			case 'participant-left': {
-				// Re-fetch the chat to get updated participant list
-				const event = data as { chatGuid: string };
-				const chatRes = await proxyGet<Chat>(
-					`/api/proxy/chat/${encodeURIComponent(event.chatGuid)}?with=participants,lastMessage`
-				);
-				if (chatRes.data) {
-					const dbChat = chatToDb(chatRes.data);
-					const existing = await db.chats.get(dbChat.guid);
-					if (existing) {
-						dbChat.isPinned = existing.isPinned;
-						dbChat.unreadCount = existing.unreadCount;
-						if (!dbChat.lastMessageText && existing.lastMessageText) {
-							dbChat.lastMessageText = existing.lastMessageText;
-						}
-					}
-					await db.transaction('rw', [db.chats, db.handles], async () => {
-						await db.chats.put(dbChat);
-						if (chatRes.data.participants) {
-							for (const handle of chatRes.data.participants) {
-								await this.upsertHandle(handle);
+							if (chat && dbMsg.dateCreated >= chat.lastMessageDate) {
+								await db.chats.update(chatGuid, {
+									lastMessageText: derivePreviewText(dbMsg)
+								});
 							}
 						}
 					});
+					break;
 				}
-				break;
+
+				case 'typing-indicator': {
+					const indicator = data as { chatGuid: string; address: string; isTyping: boolean };
+					const current = this.typingIndicators.get(indicator.chatGuid) ?? new Set<string>();
+					if (indicator.isTyping) {
+						current.add(indicator.address);
+					} else {
+						current.delete(indicator.address);
+					}
+					// Reassign to trigger reactivity
+					this.typingIndicators = new Map(this.typingIndicators.set(indicator.chatGuid, current));
+					break;
+				}
+
+				case 'chat-read-status-changed': {
+					const event = data as { chatGuid: string };
+					await db.chats.update(event.chatGuid, { unreadCount: 0 });
+					break;
+				}
+
+				case 'group-name-change': {
+					const event = data as { chatGuid: string; newName: string };
+					await db.chats.update(event.chatGuid, { displayName: event.newName });
+					break;
+				}
+
+				case 'new-findmy-location': {
+					findMyStore.applyLocationUpdate(data);
+					break;
+				}
+
+				case 'participant-added':
+				case 'participant-removed':
+				case 'participant-left': {
+					// Re-fetch the chat to get updated participant list
+					const event = data as { chatGuid: string };
+					const chatRes = await proxyGet<Chat>(
+						`/api/proxy/chat/${encodeURIComponent(event.chatGuid)}?with=participants,lastMessage`
+					);
+					if (chatRes.data) {
+						const dbChat = chatToDb(chatRes.data);
+						const existing = await db.chats.get(dbChat.guid);
+						if (existing) {
+							dbChat.isPinned = existing.isPinned;
+							dbChat.unreadCount = existing.unreadCount;
+							if (!dbChat.lastMessageText && existing.lastMessageText) {
+								dbChat.lastMessageText = existing.lastMessageText;
+							}
+						}
+						await db.transaction('rw', [db.chats, db.handles], async () => {
+							await db.chats.put(dbChat);
+							if (chatRes.data.participants) {
+								for (const handle of chatRes.data.participants) {
+									await this.upsertHandle(handle);
+								}
+							}
+						});
+					}
+					break;
+				}
 			}
-		}
 		} catch (err) {
 			console.error(`[Sync] Failed to handle ${type} event:`, err);
 		}
@@ -661,9 +661,7 @@ export class SyncEngine {
 
 			// Find a 1:1 chat that includes this address
 			const match = res.data.find(
-				(c) =>
-					c.style === 45 &&
-					c.participants?.some((p) => p.address === address)
+				(c) => c.style === 45 && c.participants?.some((p) => p.address === address)
 			);
 			if (!match) return '';
 
