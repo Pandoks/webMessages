@@ -277,9 +277,14 @@ class FindMyStore {
 		const geoPromise = new Promise<'geo'>((resolve, reject) => {
 			const timer = setTimeout(() => reject(), 5000);
 			navigator.geolocation.getCurrentPosition(
-				() => {
+				(pos) => {
 					clearTimeout(timer);
-					resolve('geo');
+					// Reject (0, 0) — Ungoogled Chromium returns this without real location services
+					if (pos.coords.latitude === 0 && pos.coords.longitude === 0) {
+						reject();
+					} else {
+						resolve('geo');
+					}
 				},
 				() => {
 					clearTimeout(timer);
@@ -300,6 +305,11 @@ class FindMyStore {
 			(pos) => {
 				const lat = pos.coords.latitude;
 				const lon = pos.coords.longitude;
+
+				// Reject (0, 0) — "Null Island"; browsers without location
+				// services (e.g. Ungoogled Chromium) return this instead of erroring
+				if (lat === 0 && lon === 0) return;
+
 				const prev = this.myLocation;
 				const shouldGeocode =
 					!prev || this.haversineMeters(prev.latitude, prev.longitude, lat, lon) > 100;
@@ -357,9 +367,9 @@ class FindMyStore {
 
 	private async fallbackToIpLocation(profile: { name: string; photoBase64: string | null }) {
 		try {
-			const res = await fetch('https://ipwho.is/');
+			const res = await fetch('/api/ip-location');
 			const data = await res.json();
-			if (!data.success || data.latitude == null || data.longitude == null) return;
+			if (!res.ok || data.latitude == null || data.longitude == null) return;
 
 			this.myLocation = {
 				latitude: data.latitude,
