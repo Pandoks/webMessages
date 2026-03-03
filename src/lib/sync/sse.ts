@@ -41,9 +41,7 @@ export class SSEClient {
 					try {
 						const result = handler(type, data);
 						if (result instanceof Promise) {
-							result.catch((err) =>
-								console.error(`[SSE] Handler error for ${type}:`, err)
-							);
+							result.catch((err) => console.error(`[SSE] Handler error for ${type}:`, err));
 						}
 					} catch (err) {
 						console.error(`[SSE] Sync handler error for ${type}:`, err);

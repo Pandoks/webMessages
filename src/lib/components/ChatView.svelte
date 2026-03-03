@@ -168,9 +168,7 @@
 
 	// Helper: fire-and-forget read receipt (not tied to effect lifecycle)
 	function sendReadReceipt(guid: string) {
-		fetch(`/api/proxy/chat/${encodeURIComponent(guid)}/read`, { method: 'POST' }).catch(
-			() => {}
-		);
+		fetch(`/api/proxy/chat/${encodeURIComponent(guid)}/read`, { method: 'POST' }).catch(() => {});
 	}
 
 	// Mark as read — fire API call immediately, then clear locally

@@ -10,12 +10,7 @@ export const POST: RequestHandler = async ({ request }) => {
 		return json({ status: 400, message: 'Invalid JSON' }, { status: 400 });
 	}
 
-	if (
-		!event ||
-		typeof event !== 'object' ||
-		!('type' in event) ||
-		!('data' in event)
-	) {
+	if (!event || typeof event !== 'object' || !('type' in event) || !('data' in event)) {
 		return json({ status: 400, message: 'Missing type or data' }, { status: 400 });
 	}
 
