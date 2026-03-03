@@ -655,7 +655,7 @@ export class SyncEngine {
 		try {
 			const res = await proxyPost<Chat[]>('/api/proxy/chat/query', {
 				with: ['participants'],
-				limit: 10
+				limit: 500
 			});
 			if (!res.data?.length) return '';
 
@@ -667,8 +667,17 @@ export class SyncEngine {
 			);
 			if (!match) return '';
 
-			// Store the chat in IndexedDB so future lookups succeed locally
-			await db.chats.put(chatToDb(match));
+			// Store the chat in IndexedDB, preserving local state
+			const dbChat = chatToDb(match);
+			const existing = await db.chats.get(dbChat.guid);
+			if (existing) {
+				dbChat.isPinned = existing.isPinned;
+				dbChat.unreadCount = existing.unreadCount;
+				if (!dbChat.lastMessageText && existing.lastMessageText) {
+					dbChat.lastMessageText = existing.lastMessageText;
+				}
+			}
+			await db.chats.put(dbChat);
 			if (match.participants) {
 				for (const handle of match.participants) {
 					await this.upsertHandle(handle);
