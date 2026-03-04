@@ -347,7 +347,9 @@
 		{/if}
 
 		{#if isRetracted}
-			<span class="text-xs text-gray-400 italic">You unsent a message {messageTime}</span>
+			<span class="text-xs text-gray-400 italic"
+				>{isSent ? 'You' : senderName} unsent a message {messageTime}</span
+			>
 		{:else}
 			<div
 				bind:this={bubbleEl}
