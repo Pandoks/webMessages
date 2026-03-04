@@ -25,6 +25,7 @@ export class SyncEngine {
 
 	async start() {
 		this.sse.onEvent((type, data) => this.handleEvent(type, data));
+		this.sse.onReconnect(() => this.catchUp());
 
 		const meta = await db.syncMeta.get('lastSyncTimestamp');
 		if (meta) {
@@ -94,6 +95,14 @@ export class SyncEngine {
 		this.resolveContacts().catch(() => {});
 		this.syncEligibility().catch(() => {});
 		this.syncAllChatMessagesInBackground().catch(() => {});
+	}
+
+	/** Run incremental sync to fill gaps after SSE reconnection */
+	private async catchUp() {
+		const meta = await db.syncMeta.get('lastSyncTimestamp');
+		if (meta) {
+			await this.incrementalSync(meta.value);
+		}
 	}
 
 	async incrementalSync(since: string) {

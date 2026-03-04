@@ -3,13 +3,22 @@ export type SSEEventHandler = (type: string, data: unknown) => void | Promise<vo
 export class SSEClient {
 	private source: EventSource | null = null;
 	private handlers: SSEEventHandler[] = [];
+	private reconnectHandler: (() => void) | null = null;
+	private hasConnected = false;
 
 	connect(url: string) {
 		this.disconnect();
+		this.hasConnected = false;
 		this.source = new EventSource(url);
 
 		this.source.onopen = () => {
-			console.log('[SSE] Connected');
+			if (this.hasConnected) {
+				console.log('[SSE] Reconnected');
+				this.reconnectHandler?.();
+			} else {
+				console.log('[SSE] Connected');
+				this.hasConnected = true;
+			}
 		};
 
 		this.source.onerror = () => {
@@ -53,6 +62,10 @@ export class SSEClient {
 
 	onEvent(handler: SSEEventHandler) {
 		this.handlers.push(handler);
+	}
+
+	onReconnect(handler: () => void) {
+		this.reconnectHandler = handler;
 	}
 
 	disconnect() {
