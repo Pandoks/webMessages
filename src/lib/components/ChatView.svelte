@@ -420,28 +420,120 @@
 
 	async function handleSend(text: string) {
 		const tempGuid = crypto.randomUUID();
+		const now = Date.now();
+		const currentReply = replyTo;
+
+		// Write to IndexedDB immediately — message appears in UI instantly
+		await db.messages.put({
+			guid: tempGuid,
+			chatGuid,
+			text,
+			handleId: 0,
+			handleAddress: null,
+			isFromMe: true,
+			dateCreated: now,
+			dateRead: null,
+			dateDelivered: null,
+			dateEdited: null,
+			dateRetracted: null,
+			subject: null,
+			associatedMessageGuid: null,
+			associatedMessageType: 0,
+			associatedMessageEmoji: null,
+			threadOriginatorGuid: currentReply?.guid ?? null,
+			attachmentGuids: [],
+			error: 0,
+			expressiveSendStyleId: null,
+			isDelivered: false,
+			groupTitle: null,
+			groupActionType: 0,
+			isSystemMessage: false,
+			itemType: 0
+		});
+		await db.chats.update(chatGuid, {
+			lastMessageDate: now,
+			lastMessageText: text
+		});
+		replyTo = null;
+
+		// Register pending send so webhook can match orphaned temps
+		syncEngine?.registerPendingSend(tempGuid, chatGuid, text);
+
+		// Reconcile with server in the background
+		reconcileTextSend(tempGuid, now, text, currentReply).catch((err) =>
+			console.error('[Send] Reconciliation failed:', err)
+		);
+	}
+
+	async function reconcileTextSend(
+		tempGuid: string,
+		now: number,
+		text: string,
+		currentReply: typeof replyTo
+	) {
 		const body: Record<string, string> = {
 			chatGuid,
 			message: text,
 			tempGuid
 		};
-		if (replyTo) {
-			body.selectedMessageGuid = replyTo.guid;
+		if (currentReply) {
+			body.selectedMessageGuid = currentReply.guid;
 		}
-		const res = await fetch('/api/proxy/message/text', {
-			method: 'POST',
-			headers: { 'Content-Type': 'application/json' },
-			body: JSON.stringify(body)
-		});
-		if (res.ok) {
-			const { data } = await res.json();
-			const now = data?.dateCreated ?? Date.now();
-			const msgGuid = data?.guid ?? tempGuid;
-			// Store the sent message locally so it appears immediately
+
+		try {
+			const res = await fetch('/api/proxy/message/text', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify(body)
+			});
+			if (res.ok) {
+				const { data } = await res.json();
+				const realGuid = data?.guid;
+				if (realGuid && realGuid !== tempGuid) {
+					syncEngine?.registerTempGuid(tempGuid, realGuid);
+					await db.transaction('rw', db.messages, async () => {
+						const temp = await db.messages.get(tempGuid);
+						if (temp) {
+							await db.messages.delete(tempGuid);
+							await db.messages.put({
+								...temp,
+								guid: realGuid,
+								dateCreated: data?.dateCreated ?? now
+							});
+						}
+					});
+				} else {
+					syncEngine?.clearPendingSend(tempGuid);
+					if (data?.dateCreated) {
+						await db.messages.update(tempGuid, {
+							dateCreated: data.dateCreated
+						});
+					}
+				}
+			} else {
+				syncEngine?.clearPendingSend(tempGuid);
+				await db.messages.delete(tempGuid);
+			}
+		} catch {
+			await db.messages.delete(tempGuid);
+		}
+	}
+
+	async function handleSendAttachment(files: File[], text: string, replyToGuid: string | null) {
+		// Send text as a separate message first (imessage-rs attachment API doesn't support inline text)
+		if (text) {
+			await handleSend(text);
+		}
+
+		for (let i = 0; i < files.length; i++) {
+			const tempGuid = crypto.randomUUID();
+			const now = Date.now();
+
+			// Write placeholder message to IndexedDB immediately
 			await db.messages.put({
-				guid: msgGuid,
+				guid: tempGuid,
 				chatGuid,
-				text,
+				text: '\ufffc',
 				handleId: 0,
 				handleAddress: null,
 				isFromMe: true,
@@ -454,7 +546,7 @@
 				associatedMessageGuid: null,
 				associatedMessageType: 0,
 				associatedMessageEmoji: null,
-				threadOriginatorGuid: replyTo?.guid ?? null,
+				threadOriginatorGuid: i === 0 && replyToGuid ? replyToGuid : null,
 				attachmentGuids: [],
 				error: 0,
 				expressiveSendStyleId: null,
@@ -464,92 +556,97 @@
 				isSystemMessage: false,
 				itemType: 0
 			});
-			// Update chat's last message
 			await db.chats.update(chatGuid, {
 				lastMessageDate: now,
-				lastMessageText: text
+				lastMessageText: text || files[i].name
 			});
+
+			// Register pending send so webhook can match orphaned temps
+			syncEngine?.registerPendingSend(tempGuid, chatGuid, '\ufffc');
+
+			// Reconcile attachment send in background
+			const fileRef = files[i];
+			const isFirst = i === 0;
+			reconcileAttachmentSend(tempGuid, now, fileRef, chatGuid, isFirst ? replyToGuid : null).catch(
+				(err) => console.error('[Send] Attachment reconciliation failed:', err)
+			);
 		}
 		replyTo = null;
 	}
 
-	async function handleSendAttachment(files: File[], text: string, replyToGuid: string | null) {
-		// Send text as a separate message first (imessage-rs attachment API doesn't support inline text)
-		if (text) {
-			await handleSend(text);
-		}
+	async function reconcileAttachmentSend(
+		tempGuid: string,
+		now: number,
+		file: File,
+		targetChatGuid: string,
+		replyToGuid: string | null
+	) {
+		const formData = new FormData();
+		formData.append('chatGuid', targetChatGuid);
+		formData.append('tempGuid', tempGuid);
+		if (replyToGuid) formData.append('selectedMessageGuid', replyToGuid);
+		formData.append('attachment', file);
 
-		for (let i = 0; i < files.length; i++) {
-			const tempGuid = crypto.randomUUID();
-			const formData = new FormData();
-			formData.append('chatGuid', chatGuid);
-			formData.append('tempGuid', tempGuid);
-			if (i === 0 && replyToGuid) formData.append('selectedMessageGuid', replyToGuid);
-			formData.append('attachment', files[i]);
-
+		try {
 			const res = await fetch('/api/proxy/message/attachment', {
 				method: 'POST',
 				body: formData
 			});
 			if (res.ok) {
 				const { data } = await res.json();
-				const now = data?.dateCreated ?? Date.now();
-				const msgGuid = data?.guid ?? crypto.randomUUID();
+				const realGuid = data?.guid;
 
-				// Store message in IndexedDB so it appears immediately
-				await db.messages.put({
-					guid: msgGuid,
-					chatGuid,
-					text: '\ufffc',
-					handleId: 0,
-					handleAddress: null,
-					isFromMe: true,
-					dateCreated: now,
-					dateRead: null,
-					dateDelivered: null,
-					dateEdited: null,
-					dateRetracted: null,
-					subject: null,
-					associatedMessageGuid: null,
-					associatedMessageType: 0,
-					associatedMessageEmoji: null,
-					threadOriginatorGuid: i === 0 && replyToGuid ? replyToGuid : null,
-					attachmentGuids: data?.attachments?.map((a: { guid: string }) => a.guid) ?? [],
-					error: 0,
-					expressiveSendStyleId: null,
-					isDelivered: data?.isDelivered ?? false,
-					groupTitle: null,
-					groupActionType: 0,
-					isSystemMessage: false,
-					itemType: 0
-				});
-
-				// Store attachment metadata so it renders inline
-				if (data?.attachments) {
-					for (const att of data.attachments) {
-						await db.attachments.put({
-							guid: att.guid,
-							messageGuid: msgGuid,
-							mimeType: att.mimeType ?? files[i].type ?? null,
-							transferName: att.transferName ?? files[i].name,
-							totalBytes: att.totalBytes ?? files[i].size,
-							width: att.width ?? null,
-							height: att.height ?? null,
-							hasLivePhoto: att.hasLivePhoto ?? false,
-							blurhash: att.blurhash ?? null,
-							isSticker: att.isSticker ?? false
+				await db.transaction('rw', [db.messages, db.attachments], async () => {
+					if (realGuid && realGuid !== tempGuid) {
+						syncEngine?.registerTempGuid(tempGuid, realGuid);
+						const temp = await db.messages.get(tempGuid);
+						if (temp) {
+							await db.messages.delete(tempGuid);
+							await db.messages.put({
+								...temp,
+								guid: realGuid,
+								dateCreated: data?.dateCreated ?? now,
+								attachmentGuids:
+									data?.attachments?.map((a: { guid: string }) => a.guid) ?? [],
+								isDelivered: data?.isDelivered ?? false
+							});
+						}
+					} else {
+						await db.messages.update(tempGuid, {
+							attachmentGuids:
+								data?.attachments?.map((a: { guid: string }) => a.guid) ?? [],
+							isDelivered: data?.isDelivered ?? false
 						});
 					}
-				}
 
-				// Update chat's last message
-				await db.chats.update(chatGuid, {
-					lastMessageDate: now,
-					lastMessageText: text || files[i].name
+					if (data?.attachments) {
+						const msgGuid = realGuid ?? tempGuid;
+						for (const att of data.attachments) {
+							await db.attachments.put({
+								guid: att.guid,
+								messageGuid: msgGuid,
+								mimeType: att.mimeType ?? file.type ?? null,
+								transferName: att.transferName ?? file.name,
+								totalBytes: att.totalBytes ?? file.size,
+								width: att.width ?? null,
+								height: att.height ?? null,
+								hasLivePhoto: att.hasLivePhoto ?? false,
+								blurhash: att.blurhash ?? null,
+								isSticker: att.isSticker ?? false
+							});
+						}
+					}
 				});
+			} else {
+				// Server rejected — attachment was not sent, remove the optimistic bubble
+				syncEngine?.clearPendingSend(tempGuid);
+				await db.messages.delete(tempGuid);
 			}
+		} catch {
+			// Network error — API may have succeeded but response was lost.
+			// Remove the bubble; if the webhook confirms it sent, it'll reappear.
+			await db.messages.delete(tempGuid);
 		}
-		replyTo = null;
 	}
 
 	async function handleReact(messageGuid: string, reaction: string) {
