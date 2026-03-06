@@ -606,15 +606,13 @@
 								...temp,
 								guid: realGuid,
 								dateCreated: data?.dateCreated ?? now,
-								attachmentGuids:
-									data?.attachments?.map((a: { guid: string }) => a.guid) ?? [],
+								attachmentGuids: data?.attachments?.map((a: { guid: string }) => a.guid) ?? [],
 								isDelivered: data?.isDelivered ?? false
 							});
 						}
 					} else {
 						await db.messages.update(tempGuid, {
-							attachmentGuids:
-								data?.attachments?.map((a: { guid: string }) => a.guid) ?? [],
+							attachmentGuids: data?.attachments?.map((a: { guid: string }) => a.guid) ?? [],
 							isDelivered: data?.isDelivered ?? false
 						});
 					}
