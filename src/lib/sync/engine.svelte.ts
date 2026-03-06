@@ -22,6 +22,23 @@ export class SyncEngine {
 	private syncedChatGuids = new Set<string>();
 	private chatMessageSyncPromises = new Map<string, Promise<void>>();
 	private contactsFullyResolved = false;
+	private pendingTempGuids = new Map<string, string>(); // realGuid -> tempGuid
+	private pendingSends = new Map<string, { chatGuid: string; text: string | null }>(); // tempGuid -> metadata
+
+	/** Register a pending send so the webhook handler can match orphaned temps */
+	registerPendingSend(tempGuid: string, chatGuid: string, text: string | null) {
+		this.pendingSends.set(tempGuid, { chatGuid, text });
+	}
+
+	/** Remove a pending send after successful reconciliation */
+	clearPendingSend(tempGuid: string) {
+		this.pendingSends.delete(tempGuid);
+	}
+
+	/** Register a temp guid mapping so the webhook handler can clean up the optimistic record */
+	registerTempGuid(tempGuid: string, realGuid: string) {
+		this.pendingTempGuids.set(realGuid, tempGuid);
+	}
 
 	async start() {
 		this.sse.onEvent((type, data) => this.handleEvent(type, data));
@@ -217,6 +234,25 @@ export class SyncEngine {
 			switch (type) {
 				case 'new-message': {
 					const msg = data as Message;
+
+					// Tier 1: exact match from successful reconciliation
+					const tempGuid = this.pendingTempGuids.get(msg.guid);
+					if (tempGuid) {
+						await db.messages.delete(tempGuid);
+						this.pendingTempGuids.delete(msg.guid);
+						this.pendingSends.delete(tempGuid);
+					}
+
+					// Tier 2: match orphaned temp sends (API succeeded but response was lost)
+					if (!tempGuid && msg.isFromMe) {
+						for (const [tGuid, meta] of this.pendingSends) {
+							if (meta.chatGuid === (msg.chats?.[0]?.guid ?? '') && meta.text === msg.text) {
+								await db.messages.delete(tGuid);
+								this.pendingSends.delete(tGuid);
+								break;
+							}
+						}
+					}
 
 					// Resolve chatGuid OUTSIDE the transaction (API fallback uses fetch)
 					let chatGuid = msg.chats?.[0]?.guid ?? '';
