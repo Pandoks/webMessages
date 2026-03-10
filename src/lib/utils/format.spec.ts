@@ -1,5 +1,10 @@
 import { describe, it, expect } from 'vitest';
-import { formatRelativeTime, formatPhoneNumber, getChatDisplayName } from './format.js';
+import {
+	formatRelativeTime,
+	formatPhoneNumber,
+	getChatDisplayName,
+	normalizeMessagingAddress
+} from './format.js';
 
 describe('formatRelativeTime', () => {
 	it('shows "now" for very recent times', () => {
@@ -42,6 +47,20 @@ describe('formatPhoneNumber', () => {
 	it('returns original for emails', () => {
 		expect(formatPhoneNumber('user@example.com')).toBe('user@example.com');
 	});
+
+	it('strips iMessage email prefixes', () => {
+		expect(formatPhoneNumber('e:user@example.com')).toBe('user@example.com');
+	});
+});
+
+describe('normalizeMessagingAddress', () => {
+	it('normalizes iMessage email handles', () => {
+		expect(normalizeMessagingAddress('e:User@Example.com')).toBe('user@example.com');
+	});
+
+	it('normalizes iMessage phone handles', () => {
+		expect(normalizeMessagingAddress('p:+1 (123) 456-7890')).toBe('+11234567890');
+	});
 });
 
 describe('getChatDisplayName', () => {
@@ -80,5 +99,11 @@ describe('getChatDisplayName', () => {
 		const handles = new Map<string, string | null>([['+11234567890', 'Alice']]);
 		const result = getChatDisplayName(null, ['+11234567890', '+442012345678'], handles);
 		expect(result).toBe('Alice, +442012345678');
+	});
+
+	it('uses normalized handle lookups for iMessage-prefixed addresses', () => {
+		const handles = new Map<string, string | null>([['user@example.com', 'Example User']]);
+		const result = getChatDisplayName(null, ['e:user@example.com'], handles);
+		expect(result).toBe('Example User');
 	});
 });

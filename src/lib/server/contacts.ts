@@ -3,6 +3,7 @@ import { promisify } from 'node:util';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { readdirSync } from 'node:fs';
+import { normalizeMessagingAddress } from '$lib/utils/format.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -26,10 +27,6 @@ function findDatabases(): string[] {
 	} catch {
 		return [];
 	}
-}
-
-function normalizeAddress(addr: string): string {
-	return addr.replace(/[\s\-()]/g, '').toLowerCase();
 }
 
 async function queryDb(dbPath: string): Promise<ContactsResult> {
@@ -66,7 +63,7 @@ WHERE r.Z_ENT = 22;`;
 			const [name, addr] = line.split('\t');
 			if (!name?.trim() || !addr?.trim()) continue;
 
-			const normalized = normalizeAddress(addr);
+			const normalized = normalizeMessagingAddress(addr);
 			data[normalized] = name;
 
 			// US phone number variants
@@ -124,7 +121,7 @@ WHERE r.Z_ENT = 22
 			const [, addr, imgSource, imgHex] = parts;
 			if (!addr?.trim() || !imgSource || !imgHex) continue;
 
-			const normalized = normalizeAddress(addr);
+			const normalized = normalizeMessagingAddress(addr);
 			const base64 = Buffer.from(imgHex, 'hex').toString('base64');
 			photos[normalized] = base64;
 

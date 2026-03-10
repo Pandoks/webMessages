@@ -10,6 +10,7 @@ import type { Chat, Message, Handle } from '$lib/types/index.js';
 import type { ApiResponse } from '$lib/types/index.js';
 import { SSEClient } from '$lib/sync/sse.js';
 import { findMyStore } from '$lib/stores/findmy.svelte.js';
+import { normalizeMessagingAddress } from '$lib/utils/format.js';
 
 const MESSAGES_PER_CHAT = 50;
 
@@ -492,7 +493,7 @@ export class SyncEngine {
 			if (handles.length) {
 				await db.transaction('rw', db.handles, async () => {
 					for (const h of handles) {
-						const normalized = h.address.replace(/[\s\-()]/g, '').toLowerCase();
+						const normalized = normalizeMessagingAddress(h.address);
 						const name = data?.[normalized];
 						const avatar = photos?.[normalized];
 						const updates: Record<string, string> = {
@@ -513,7 +514,7 @@ export class SyncEngine {
 
 			const existingAddresses = new Set(
 				((await db.handles.toCollection().primaryKeys()) as string[]).map((addr) =>
-					addr.replace(/[\s\-()]/g, '').toLowerCase()
+					normalizeMessagingAddress(addr)
 				)
 			);
 

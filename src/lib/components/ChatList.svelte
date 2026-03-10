@@ -4,7 +4,11 @@
 	import { page } from '$app/state';
 	import ChatListItem from './ChatListItem.svelte';
 	import NewChatModal from './NewChatModal.svelte';
-	import { getChatDisplayName, formatPhoneNumber } from '$lib/utils/format.js';
+	import {
+		getChatDisplayName,
+		formatPhoneNumber,
+		normalizeMessagingAddress
+	} from '$lib/utils/format.js';
 	import type { DbChat, DbHandle } from '$lib/db/types.js';
 
 	let search = $state('');
@@ -29,8 +33,28 @@
 		return () => sub.unsubscribe();
 	});
 
-	const handleMap = $derived(new Map(allHandles.map((h) => [h.address, h.displayName])));
-	const avatarMap = $derived(new Map(allHandles.map((h) => [h.address, h.avatarBase64])));
+	const handleMap = $derived.by(() => {
+		const map = new Map<string, string | null>();
+		for (const h of allHandles) {
+			map.set(h.address, h.displayName);
+			const normalized = normalizeMessagingAddress(h.address);
+			if (!map.has(normalized) || !map.get(normalized)) {
+				map.set(normalized, h.displayName);
+			}
+		}
+		return map;
+	});
+	const avatarMap = $derived.by(() => {
+		const map = new Map<string, string | null>();
+		for (const h of allHandles) {
+			map.set(h.address, h.avatarBase64);
+			const normalized = normalizeMessagingAddress(h.address);
+			if (!map.has(normalized) || !map.get(normalized)) {
+				map.set(normalized, h.avatarBase64);
+			}
+		}
+		return map;
+	});
 
 	// Deduplicate chats:
 	// - Group chats (style 43): by sorted participant set

@@ -1,3 +1,12 @@
+export function normalizeMessagingAddress(address: string): string {
+	return address
+		.trim()
+		.toLowerCase()
+		.replace(/^(?:e:|mailto:)/, '')
+		.replace(/^(?:p:|tel:)/, '')
+		.replace(/[\s\-()]/g, '');
+}
+
 export function formatRelativeTime(timestamp: number): string {
 	const diff = Date.now() - timestamp;
 	const seconds = Math.floor(diff / 1000);
@@ -17,10 +26,11 @@ export function formatRelativeTime(timestamp: number): string {
 }
 
 export function formatPhoneNumber(address: string): string {
-	if (address.includes('@')) return address;
-	const usMatch = address.match(/^\+1(\d{3})(\d{3})(\d{4})$/);
+	const normalized = normalizeMessagingAddress(address);
+	if (normalized.includes('@')) return normalized;
+	const usMatch = normalized.match(/^\+1(\d{3})(\d{3})(\d{4})$/);
 	if (usMatch) return `(${usMatch[1]}) ${usMatch[2]}-${usMatch[3]}`;
-	return address;
+	return normalized;
 }
 
 const STATE_ABBREVS: Record<string, string> = {
@@ -114,5 +124,10 @@ export function getChatDisplayName(
 ): string {
 	if (displayName) return displayName;
 	if (participants.length === 0) return 'Unknown';
-	return participants.map((addr) => handles.get(addr) || formatPhoneNumber(addr)).join(', ');
+	return participants
+		.map(
+			(addr) =>
+				handles.get(addr) || handles.get(normalizeMessagingAddress(addr)) || formatPhoneNumber(addr)
+		)
+		.join(', ');
 }
