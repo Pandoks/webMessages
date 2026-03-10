@@ -481,21 +481,36 @@ export class SyncEngine {
 		const handles = await db.handles.filter((h) => !h.displayName).toArray();
 
 		try {
-			const res = await fetch('/api/contacts');
-			if (!res.ok) return;
+			const [contactsRes, meRes] = await Promise.all([
+				fetch('/api/contacts'),
+				fetch('/api/me').catch(() => null)
+			]);
+			if (!contactsRes.ok) return;
 
-			const { data, photos } = (await res.json()) as {
+			const { data, photos } = (await contactsRes.json()) as {
 				data: Record<string, string>;
 				photos: Record<string, string>;
 			};
+			const me = meRes?.ok
+				? ((await meRes.json()) as {
+						name: string;
+						photoBase64: string | null;
+						identifiers?: string[];
+					})
+				: null;
+			const selfIdentifiers = new Set(
+				(me?.identifiers ?? []).map((identifier) => normalizeMessagingAddress(identifier))
+			);
 
 			// Step 1: Update existing handles that don't have a displayName yet
 			if (handles.length) {
 				await db.transaction('rw', db.handles, async () => {
 					for (const h of handles) {
 						const normalized = normalizeMessagingAddress(h.address);
-						const name = data?.[normalized];
-						const avatar = photos?.[normalized];
+						const name = data?.[normalized] || (selfIdentifiers.has(normalized) ? me?.name : null);
+						const avatar =
+							photos?.[normalized] ||
+							(selfIdentifiers.has(normalized) ? (me?.photoBase64 ?? null) : null);
 						const updates: Record<string, string> = {
 							displayName: name || ''
 						};

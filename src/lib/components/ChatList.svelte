@@ -56,6 +56,14 @@
 		return map;
 	});
 
+	function getResolvedHandleName(address: string): string | null {
+		return handleMap.get(address) || handleMap.get(normalizeMessagingAddress(address)) || null;
+	}
+
+	function getResolvedAvatar(address: string): string | null {
+		return avatarMap.get(address) || avatarMap.get(normalizeMessagingAddress(address)) || null;
+	}
+
 	// Deduplicate chats:
 	// - Group chats (style 43): by sorted participant set
 	// - 1:1 chats (style 45): by resolved contact name (merges phone + email for same person)
@@ -78,7 +86,7 @@
 				seen.set(key, chat);
 			} else if (chat.style === 45 && chat.participants.length === 1) {
 				// 1:1 chat: deduplicate by resolved contact name
-				const name = handleMap.get(chat.participants[0]);
+				const name = getResolvedHandleName(chat.participants[0]);
 				if (name) {
 					const key = `1:1:${name}`;
 					const existing = seen.get(key);
@@ -104,7 +112,7 @@
 		const nameToGuids = new Map<string, string[]>();
 		for (const chat of allChats) {
 			if (chat.style === 45 && chat.participants.length === 1) {
-				const name = handleMap.get(chat.participants[0]);
+				const name = getResolvedHandleName(chat.participants[0]);
 				if (name) {
 					const guids = nameToGuids.get(name) ?? [];
 					guids.push(chat.guid);
@@ -193,8 +201,8 @@
 		<div class="shrink-0 border-b border-gray-200 dark:border-gray-700">
 			{#each pinnedChats as chat (chat.guid)}
 				{@const chatParticipants = chat.participants.map((addr) => {
-					const name = handleMap.get(addr) || formatPhoneNumber(addr);
-					const raw = avatarMap.get(addr);
+					const name = getResolvedHandleName(addr) || formatPhoneNumber(addr);
+					const raw = getResolvedAvatar(addr);
 					const mime = raw?.startsWith('iVBOR') ? 'image/png' : 'image/jpeg';
 					return { name, avatar: raw ? `data:${mime};base64,${raw}` : null };
 				})}
@@ -216,8 +224,8 @@
 	<div class="flex-1 overflow-y-auto">
 		{#each regularChats as chat (chat.guid)}
 			{@const chatParticipants = chat.participants.map((addr) => {
-				const name = handleMap.get(addr) || formatPhoneNumber(addr);
-				const raw = avatarMap.get(addr);
+				const name = getResolvedHandleName(addr) || formatPhoneNumber(addr);
+				const raw = getResolvedAvatar(addr);
 				const mime = raw?.startsWith('iVBOR') ? 'image/png' : 'image/jpeg';
 				return { name, avatar: raw ? `data:${mime};base64,${raw}` : null };
 			})}
