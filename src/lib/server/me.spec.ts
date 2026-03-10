@@ -26,12 +26,7 @@ describe('mergeSelfIdentifiers', () => {
 				active_alias: '+15550101234',
 				aliases: [{ Alias: 'masked-user@example.com' }]
 			})
-		).toEqual([
-			'5550105678',
-			'me@example.com',
-			'maskeduser@example.com',
-			'+15550101234'
-		]);
+		).toEqual(['5550105678', 'me@example.com', 'maskeduser@example.com', '+15550101234']);
 	});
 
 	it('normalizes imessage-style prefixes while merging', () => {
